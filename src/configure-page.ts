@@ -49,7 +49,13 @@ export function renderConfigurePage(host: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>Mico Leão Dublado API</h1>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
+      <img src="/logo.jpg" alt="Mico Leão Dublado" style="width:56px;height:56px;border-radius:10px;object-fit:cover" />
+      <div>
+        <h1 style="margin:0">Mico Leão Dublado <span style="color:#7da6ff">V2</span></h1>
+        <div style="font-size:12px;color:#6c7591">Stremio addon · open-source</div>
+      </div>
+    </div>
     <p>Configure um provedor Debrid para streams cacheados (sem torrent local).</p>
 
     <label for="provider">Provedor</label>
@@ -74,6 +80,19 @@ export function renderConfigurePage(host: string): string {
       <code id="manifestUrl"></code>
     </div>
   </div>
+
+  <footer style="margin-top:24px;color:#6c7591;font-size:13px;text-align:center;max-width:460px">
+    <p style="margin:0 0 8px">
+      <a href="https://github.com/joaosouz4dev/MicoLeaoDubladoAPIV2" target="_blank" style="color:#7da6ff;text-decoration:none">
+        ⭐ github.com/joaosouz4dev/MicoLeaoDubladoAPIV2
+      </a>
+    </p>
+    <p style="margin:0;font-size:11px">
+      Sucessor independente de
+      <a href="https://github.com/victorgveloso/MicoLeaoDubladoAPI" target="_blank" style="color:#6c7591">victorgveloso/MicoLeaoDubladoAPI</a>
+      · Apache 2.0
+    </p>
+  </footer>
 
 <script>
   const host = ${JSON.stringify(host)};

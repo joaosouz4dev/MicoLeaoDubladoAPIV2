@@ -1,17 +1,22 @@
 {
-	"id": "brazilian-addon",
-	"name": "Mico-Leão Dublado (BR addon)",
-	"logo": "https://i.ibb.co/9tWdHsv/icon.jpg",
-	"version": "1.2.0",
-	"description": "Stremio addon for dubbed movies in portuguese (brazil).",
+	"id": "brazilian-addon-v2",
+	"name": "Mico-Leão Dublado V2 (BR addon)",
+	"logo": "https://raw.githubusercontent.com/joaosouz4dev/MicoLeaoDubladoAPIV2/main/assets/logo.jpg",
+	"background": "https://raw.githubusercontent.com/joaosouz4dev/MicoLeaoDubladoAPIV2/main/assets/logo.jpg",
+	"version": "2.0.0",
+	"description": "🇧🇷 Filmes e séries dublados em português. Suporte a Debrid (Real-Debrid, TorBox). Versão V2 — código aberto em github.com/joaosouz4dev/MicoLeaoDubladoAPIV2",
 	"resources": ["catalog", "stream"],
 	"types": ["movie", "series"],
 	"catalogs": [{
 		"type": "movie",
 		"id": "BrazilianCatalog",
-		"name": "Filmes Dublados (ptbr)",
+		"name": "Filmes Dublados (ptbr) V2",
 		"genres": ["Ação", "Animação", "Aventura", "Clássico", "Comédia", "Documentário", "Drama", "Fantasia", "Ficção", "Faroeste", "Guerra", "Músicas", "Nacional", "Policial", "Romance", "Suspense", "Terror"],
 		"extraSupported": ["search", "genre", "skip"]
 	}],
-	"idPrefixes": ["tt"]
+	"idPrefixes": ["tt"],
+	"behaviorHints": {
+		"configurable": true,
+		"configurationRequired": false
+	}
 }

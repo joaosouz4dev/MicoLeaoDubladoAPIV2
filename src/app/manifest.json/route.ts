@@ -1,17 +1,12 @@
 import { NextResponse } from 'next/server';
-import { ensureDb } from '../_lib/db';
-import ManifestDAO from '../../persistence/controllers/manifest-dao';
-import defaultManifest from '../../persistence/models/stub/manifest.json';
+import manifest from '../../persistence/models/stub/manifest.json';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Manifest is static metadata about the addon — served from the JSON stub directly
+ * so it always reflects the deployed code without needing a DB round-trip.
+ */
 export async function GET() {
-    try {
-        await ensureDb();
-        const manifest = await new ManifestDAO().get();
-        return NextResponse.json(manifest.toObject ? manifest.toObject() : manifest);
-    } catch (err) {
-        console.error(`Manifest fallback: ${err}`);
-        return NextResponse.json(defaultManifest);
-    }
+    return NextResponse.json(manifest);
 }
