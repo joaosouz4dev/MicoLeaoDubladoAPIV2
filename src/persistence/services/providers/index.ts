@@ -17,6 +17,14 @@ export type { NormalizedStream } from './types';
 
 const SEARCH_CACHE_TTL_MS = parseInt(process.env.SEARCH_CACHE_TTL_MS || `${30 * 60 * 1000}`, 10);
 
+/**
+ * Torrentio blocks cloud IPs (Vercel, Cloudflare, AWS, ...) at the network
+ * level. Skip it unless TORRENTIO_BASE explicitly points to a custom proxy
+ * the operator has confirmed works.
+ */
+const TORRENTIO_ENABLED = !!process.env.TORRENTIO_BASE
+    && !process.env.TORRENTIO_BASE.includes('torrentio.strem.fun');
+
 export async function aggregateProviders(
     type: 'movie' | 'series',
     stremioId: string
@@ -34,11 +42,12 @@ export async function aggregateProviders(
 
     // 2. Fan out to providers
     const imdbId = stremioId.split(':')[0];
-    const settled = await Promise.allSettled([
+    const promises: Promise<NormalizedStream[]>[] = [
         fetchFromTorrentIndexer(imdbId, type),
-        fetchFromTorrentio(type, stremioId),
         fetchFromThePirataFilmes(imdbId)
-    ]);
+    ];
+    if (TORRENTIO_ENABLED) promises.push(fetchFromTorrentio(type, stremioId));
+    const settled = await Promise.allSettled(promises);
     const all: NormalizedStream[] = [];
     for (const s of settled) {
         if (s.status === 'fulfilled') all.push(...s.value);
