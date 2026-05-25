@@ -91,26 +91,20 @@ async function collectStatus() {
         };
     }
 
-    // Upstream addons
+    // Upstream addons we actively use as scraping sources. Torrentio + the
+    // Cloudflare Worker proxy are intentionally omitted — Torrentio blocks
+    // every cloud IP range (including Workers), so they're dead-weight rows
+    // on this dashboard. Set TORRENTIO_BASE to a working endpoint to re-enable.
     const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Stremio/4.4';
     const upstreams = [
-        { name: 'torrentio', url: 'https://torrentio.strem.fun/manifest.json' },
         { name: 'mediafusion', url: 'https://mediafusion.elfhosted.com/manifest.json' }
     ];
-    if (process.env.TORRENTIO_BASE && process.env.TORRENTIO_BASE.includes('workers.dev')) {
-        upstreams.unshift({ name: 'cloudflare-worker', url: process.env.TORRENTIO_BASE + '/manifest.json' });
-    }
     for (const u of upstreams) {
         const start = Date.now();
         try {
             const r = await axios.get(u.url, {
                 timeout: 5000,
-                headers: {
-                    'User-Agent': ua,
-                    ...(process.env.WORKER_SECRET && u.name === 'cloudflare-worker'
-                        ? { 'x-worker-secret': process.env.WORKER_SECRET }
-                        : {})
-                }
+                headers: { 'User-Agent': ua }
             });
             data.checks[u.name] = { ok: r.status === 200, latencyMs: Date.now() - start };
         } catch (err: any) {
@@ -162,7 +156,6 @@ async function collectStatus() {
 function renderHtml(d: any): string {
     const checks = d.checks;
     const ok = d.ok;
-    const upstreamOk = checks['cloudflare-worker']?.ok || checks.torrentio?.ok || checks.mediafusion?.ok;
     const summary = ok
         ? '<span class="badge badge-ok">Sistema operacional</span>'
         : '<span class="badge badge-warn">Atenção necessária</span>';
@@ -278,22 +271,6 @@ function renderHtml(d: any): string {
         </div>
       </div>
     </div>
-
-    ${checks['cloudflare-worker'] ? renderStatCard('Cloudflare Worker (Torrentio Proxy)', checks['cloudflare-worker'], [
-        ['Status HTTP', checks['cloudflare-worker'].status ?? (checks['cloudflare-worker'].ok ? '200' : '—')],
-        ['Latência', checks['cloudflare-worker'].latencyMs != null ? `${checks['cloudflare-worker'].latencyMs}ms` : '—'],
-        ['Detalhe', checks['cloudflare-worker'].detail || (checks['cloudflare-worker'].ok ? 'OK' : '—')]
-    ]) : `<div class="card">
-      <h2><span class="dot warn"></span>Cloudflare Worker</h2>
-      <div class="row"><span class="key">Status</span><span class="val dim">Não configurado</span></div>
-      <div class="row"><span class="key">Como ativar</span><span class="val dim">Deploy o worker em cloudflare-worker/ e defina TORRENTIO_BASE</span></div>
-    </div>`}
-
-    ${renderStatCard('Torrentio (direto)', checks.torrentio, [
-        ['Status HTTP', checks.torrentio?.status ?? (checks.torrentio?.ok ? '200' : '—')],
-        ['Latência', checks.torrentio?.latencyMs != null ? `${checks.torrentio.latencyMs}ms` : '—'],
-        ['Detalhe', checks.torrentio?.ok ? 'OK' : 'Bloqueia IPs cloud (use o Worker)']
-    ])}
 
     ${renderStatCard('MediaFusion', checks.mediafusion, [
         ['Status HTTP', checks.mediafusion?.status ?? (checks.mediafusion?.ok ? '200' : '—')],
