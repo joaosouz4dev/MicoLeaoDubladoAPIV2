@@ -1,7 +1,7 @@
 import Stream, { IStream } from '../models/stream';
 import StreamDao from './stream-dao';
 import { fetchSeeders } from '../services/tracker-scraper';
-import { scrapeAndProxyTorrentio } from '../services/torrentio-proxy';
+import { aggregateProviders, NormalizedStream } from '../services/providers';
 import { ensureMetaCached } from '../services/cinemeta';
 import { ContentType } from '../models/stremio';
 
@@ -11,14 +11,13 @@ const REFRESH_THRESHOLD_MS = parseInt(process.env.SEEDERS_REFRESH_MS || `${ONE_M
 /**
  * Upper layer over StreamDao.
  *
- * Responsibilities:
- *  - Fetch streams from the DAO
- *  - Fall back to Torrentio proxy when the local cache is empty, filtering for PT-BR
- *  - Refresh stale seeder counts on demand (tracker scrape) past the configured threshold
- *  - Format stream titles with seeder counts before returning them upstream
- *
- * The seeders refresh and Torrentio fetch are best-effort: failures preserve cached
- * data and let the next request try again.
+ * Strategy: DB-first, scrape-on-miss, write-back.
+ *   1. Hit the local cache. If we have streams for this id, return them and
+ *      refresh stale seeder counts in the background.
+ *   2. On cache miss, ask the aggregator (torrent-indexer + Torrentio) in
+ *      parallel. Persist the union in the DB so the next request is fast.
+ *   3. Always best-effort: any failure preserves cached data and lets the
+ *      next request try again.
  */
 export default class StreamController {
     private dao: StreamDao;
@@ -27,12 +26,6 @@ export default class StreamController {
         this.dao = dao || new StreamDao();
     }
 
-    /**
-     * Return streams for a Stremio streamId.
-     *
-     * Falls back to Torrentio (filtered for PT-BR) when the local cache has nothing,
-     * persisting the discovered streams in the background to grow our cache organically.
-     */
     async getByStreamId(streamId: string, type?: ContentType): Promise<Partial<IStream>[]> {
         const cached = await this.dao.getByStreamId(streamId);
         if (cached.length > 0) {
@@ -40,18 +33,51 @@ export default class StreamController {
             return cached.map((s) => this.formatTitle(s));
         }
 
-        // Empty cache — try Torrentio as a fallback and persist what we find.
-        const inferredType: 'movie' | 'series' = type === 'series' || streamId.includes(':') ? 'series' : 'movie';
-        const fromTorrentio = await scrapeAndProxyTorrentio(inferredType, streamId);
-        if (fromTorrentio.length === 0) return [];
+        const inferredType: 'movie' | 'series' =
+            type === 'series' || streamId.includes(':') ? 'series' : 'movie';
 
-        // Fire-and-forget Cinemeta lookup so the meta lands in our catalog.
+        const aggregated = await aggregateProviders(inferredType, streamId);
+        if (aggregated.length === 0) return [];
+
+        // Persist in the background — don't slow down the response
+        this.persist(aggregated, streamId, inferredType).catch((err) =>
+            console.error(`[stream-controller] persist failed: ${err}`)
+        );
+
+        // Fire Cinemeta lookup so the catalog also gets populated
         const imdbId = streamId.split(':')[0];
         ensureMetaCached(inferredType, imdbId).catch((err) =>
             console.error(`[stream-controller] meta cache failed: ${err}`)
         );
 
-        return fromTorrentio.map((s) => this.formatTitlePlain(s));
+        return aggregated.map((s) => this.formatNormalized(s, streamId, inferredType));
+    }
+
+    private async persist(streams: NormalizedStream[], streamId: string, type: 'movie' | 'series'): Promise<void> {
+        const [metaId, seasonStr, episodeStr] = streamId.split(':');
+        const season = seasonStr ? parseInt(seasonStr, 10) : undefined;
+        const episode = episodeStr ? parseInt(episodeStr, 10) : undefined;
+        await Promise.all(streams.map(async (s) => {
+            try {
+                const exists = await Stream.findOne({ metaId, infoHash: s.infoHash }).exec();
+                if (exists) return;
+                await new Stream({
+                    metaId,
+                    streamId,
+                    type,
+                    title: s.title,
+                    infoHash: s.infoHash,
+                    sources: s.sources,
+                    seeders: s.seeders,
+                    size: s.size,
+                    season,
+                    episode,
+                    updatedAt: new Date()
+                }).save();
+            } catch (err) {
+                console.error(`[stream-controller] persist ${s.infoHash}: ${err}`);
+            }
+        }));
     }
 
     private async refreshIfStale(stream: IStream): Promise<void> {
@@ -69,7 +95,7 @@ export default class StreamController {
                 { $set: { seeders: liveSeeders, updatedAt: stream.updatedAt } }
             ).exec();
         } catch (err) {
-            console.error(`Failed to persist refreshed seeders for ${stream.infoHash}: ${err}`);
+            console.error(`[stream-controller] refresh persist: ${err}`);
         }
     }
 
@@ -81,10 +107,18 @@ export default class StreamController {
         return stream;
     }
 
-    private formatTitlePlain(stream: Partial<IStream>): Partial<IStream> {
-        const base = stream.title || '';
-        const tag = `👥 ${stream.seeders ?? 0}`;
-        if (base.includes('👥')) return stream;
-        return { ...stream, title: base ? `${base}\n${tag}` : tag };
+    private formatNormalized(s: NormalizedStream, streamId: string, type: 'movie' | 'series'): Partial<IStream> {
+        const [metaId] = streamId.split(':');
+        const title = `${s.title}\n👥 ${s.seeders} · ${s.provider}`;
+        return {
+            metaId,
+            streamId,
+            type,
+            title,
+            infoHash: s.infoHash,
+            sources: s.sources,
+            seeders: s.seeders,
+            size: s.size
+        };
     }
 }

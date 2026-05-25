@@ -12,5 +12,11 @@
                 { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
             ]
         }
+    ],
+    "crons": [
+        {
+            "path": "/api/cron/scrape",
+            "schedule": "0 */6 * * *"
+        }
     ]
 }
