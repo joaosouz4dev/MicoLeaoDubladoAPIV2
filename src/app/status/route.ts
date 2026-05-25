@@ -4,7 +4,7 @@ import axios from 'axios';
 import { connect } from '../../config';
 import Stream from '../../persistence/models/stream';
 import Meta from '../../persistence/models/meta';
-import manifest from '../../persistence/models/stub/manifest.json';
+import { manifest } from '../../persistence/models/stub/manifest';
 import { getBreakerStates } from '../../persistence/services/providers/circuit-breaker';
 import { listStremioAddonSources } from '../../persistence/services/providers/stremio-addon';
 import { stremthruHealth, stremthruBaseUrl } from '../../persistence/services/debrid/stremthru';

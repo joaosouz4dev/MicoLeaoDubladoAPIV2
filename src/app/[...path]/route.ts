@@ -10,7 +10,7 @@ import { parseDebridConfig, resolveDebridStreams, DebridConfig } from '../../per
 import { formatStream, parseRelease, qualityRank } from '../../persistence/services/stream-formatter';
 import { renderConfigurePage } from '../../configure-page';
 import { ContentType } from '../../persistence/models/stremio';
-import manifest from '../../persistence/models/stub/manifest.json';
+import { manifest } from '../../persistence/models/stub/manifest';
 import MovieDTO from '../../persistence/models/transfer-objects/movie';
 import SeriesDTO from '../../persistence/models/transfer-objects/series';
 import { IStream } from '../../persistence/models/stream';
