@@ -15,7 +15,7 @@ export interface DebridConfig {
  * Each stream is processed in parallel. Streams that fail to resolve are dropped from the
  * returned list — Stremio will then show only the successful Debrid links.
  */
-export async function resolveDebridStreams(streams: IStream[], config: DebridConfig): Promise<any[]> {
+export async function resolveDebridStreams(streams: Partial<IStream>[], config: DebridConfig): Promise<any[]> {
     const resolved = await Promise.all(
         streams.map(async (s) => {
             const result = await resolveOne(s, config);
@@ -31,8 +31,9 @@ export async function resolveDebridStreams(streams: IStream[], config: DebridCon
     return resolved.filter((s): s is any => s !== null);
 }
 
-async function resolveOne(stream: IStream, config: DebridConfig) {
+async function resolveOne(stream: Partial<IStream>, config: DebridConfig) {
     const { infoHash, sources } = stream;
+    if (!infoHash) return null;
     if (config.provider === 'realdebrid') {
         return resolveRealDebrid(config.apikey, infoHash, sources || []);
     }

@@ -114,12 +114,11 @@ async function handleCatalogRoute(route: string[]) {
 async function handleStreamRoute(route: string[], debridConfig: DebridConfig | null) {
     if (route.length < 3) return NextResponse.json({ streams: [] });
     await ensureDb();
-    const streamId = stripJson(route.slice(2).join(':')); // re-join in case Stremio sends with slashes
-    // Stremio actually sends "tt1234:1:1.json" as a single path segment, but be defensive:
+    const type = route[1] as ContentType;
     const cleanId = stripJson(route[2]);
-    const idToUse = cleanId.includes(':') ? cleanId : streamId;
+    const idToUse = cleanId.includes(':') ? cleanId : stripJson(route.slice(2).join(':'));
 
-    const streams = await new StreamController().getByStreamId(idToUse);
+    const streams = await new StreamController().getByStreamId(idToUse, type);
 
     if (debridConfig) {
         try {
@@ -129,7 +128,16 @@ async function handleStreamRoute(route: string[], debridConfig: DebridConfig | n
             console.error(`[stream] debrid failed: ${err}`);
         }
     }
-    return NextResponse.json({ streams });
+    // Strip Mongoose-specific keys; Stremio only needs the well-known fields.
+    const trimmed = streams.map((s: any) => ({
+        name: s.name,
+        title: s.title,
+        infoHash: s.infoHash,
+        fileIdx: s.fileIdx,
+        sources: s.sources,
+        behaviorHints: s.behaviorHints
+    }));
+    return NextResponse.json({ streams: trimmed });
 }
 
 async function handleMetaRoute(route: string[]) {

@@ -56,9 +56,9 @@ export async function createCatalogHandler(args: Args): Promise<{ metas: IMeta[]
  */
 export async function createStreamHandler(args: Args, debridConfig?: DebridConfig) : Promise<{ streams: any[] }> {
     let streamController = new StreamController();
-    let streams: IStream[] = [];
+    let streams: Partial<IStream>[] = [];
     try {
-        streams = await streamController.getByStreamId(args.id);
+        streams = await streamController.getByStreamId(args.id, args.type);
     } catch (error) {
         console.error(`Stream Handler ERROR: ${error}`);
         return { streams: [] };
@@ -66,7 +66,7 @@ export async function createStreamHandler(args: Args, debridConfig?: DebridConfi
 
     if (debridConfig && debridConfig.apikey && debridConfig.provider) {
         try {
-            return { streams: await resolveDebridStreams(streams, debridConfig) };
+            return { streams: await resolveDebridStreams(streams as IStream[], debridConfig) };
         } catch (error) {
             console.error(`Debrid resolution failed, falling back to torrent: ${error}`);
         }
