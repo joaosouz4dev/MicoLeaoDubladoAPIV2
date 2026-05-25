@@ -1,26 +1,32 @@
 /**
  * Real-Debrid client.
  *
- * Resolves a torrent to a playable HTTP URL via Real-Debrid.
+ * Resolves a torrent to a playable HTTP URL — only when Real-Debrid already
+ * has it cached. Non-cached torrents are dropped so Stremio doesn't show
+ * stale `[RD ⚡]` rows that would either timeout or queue a download on the
+ * user's account.
  *
- * Two-mode flow:
- *  1. Check /torrents/instantAvailability/<hash> — if Real-Debrid already
- *     has this torrent cached, we get back a list of "variants" (file
- *     combinations) immediately.
- *  2a. Cached: addMagnet + selectFiles(<video file ids>) + info → unrestrict
- *      → playable URL. Fast (~3-5s).
- *  2b. Not cached: return null so the caller can fall back to the raw
- *      torrent stream. We DO NOT trigger a download — Stremio would time
- *      out waiting for RD to finish, and Vercel's 60s function limit makes
- *      it worse.
+ * Cache detection (June 2025+ reality)
+ * ====================================
+ * Real-Debrid deprecated `/torrents/instantAvailability` in mid-2025:
+ * it now returns `[]`/`{}` for everything, so we can't trust it as a
+ * gate anymore.
+ *
+ * Workaround: add the magnet, check status within ~3s, and:
+ *   - status === 'downloaded'  → cached, proceed with unrestrict
+ *   - any other status         → not cached, DELETE the torrent and bail
+ *
+ * The DELETE is critical: without it, every non-cached request leaves a
+ * "queued"/"compressing" torrent on the user's account that they have to
+ * clean up manually.
  *
  * Reference: https://api.real-debrid.com/
  */
 import axios from 'axios';
 
 const BASE_URL = 'https://api.real-debrid.com/rest/1.0';
-const POLL_TIMEOUT_MS = 15000;
-const POLL_INTERVAL_MS = 1000;
+const FAST_POLL_TIMEOUT_MS = 4000;
+const FAST_POLL_INTERVAL_MS = 800;
 
 const VIDEO_EXTENSIONS = /\.(mkv|mp4|avi|m4v|mov|wmv|flv|webm|ts|m2ts)$/i;
 
@@ -39,30 +45,14 @@ function buildMagnet(infoHash: string, sources: string[] = []): string {
     return `magnet:?xt=urn:btih:${infoHash}${trackers}`;
 }
 
-/**
- * Ask Real-Debrid whether the torrent is already cached on their side.
- * The response is an object keyed by hash; an empty object means "not cached".
- *
- * The returned variants describe which file subsets can be served instantly.
- * We don't need to act on them — knowing the hash is cached is enough, since
- * addMagnet+selectFiles will resolve immediately for cached content.
- */
-async function isInstantlyAvailable(apikey: string, infoHash: string): Promise<boolean> {
+async function deleteTorrent(apikey: string, torrentId: string): Promise<void> {
     try {
-        const res = await axios.get(
-            `${BASE_URL}/torrents/instantAvailability/${infoHash}`,
-            { headers: { Authorization: `Bearer ${apikey}` }, timeout: 5000 }
-        );
-        const data = res.data?.[infoHash];
-        if (!data) return false;
-        // RD shape: `{ rd: [ { fileId: {filename, filesize}, ... }, ... ] }`
-        // OR an empty array when not cached.
-        if (Array.isArray(data) && data.length === 0) return false;
-        if (data.rd && Array.isArray(data.rd) && data.rd.length > 0) return true;
-        return false;
+        await axios.delete(`${BASE_URL}/torrents/delete/${torrentId}`, {
+            headers: { Authorization: `Bearer ${apikey}` },
+            timeout: 4000
+        });
     } catch (err: any) {
-        console.error(`[real-debrid] instantAvailability failed: ${err.message || err}`);
-        return false;
+        console.error(`[real-debrid] delete ${torrentId} failed: ${err.message || err}`);
     }
 }
 
@@ -71,28 +61,33 @@ export async function resolveRealDebrid(
     infoHash: string,
     sources: string[] = []
 ): Promise<RealDebridStream | null> {
-    // Fail fast for non-cached torrents — Stremio can't wait 30+ minutes
-    // for RD to fetch a non-cached release.
-    const cached = await isInstantlyAvailable(apikey, infoHash);
-    if (!cached) {
-        console.log(`[real-debrid] ${infoHash} not in RD cache, skipping`);
-        return null;
-    }
-
     const headers = { Authorization: `Bearer ${apikey}` };
+    let torrentId: string | undefined;
 
     try {
         const addRes = await axios.post(
             `${BASE_URL}/torrents/addMagnet`,
             new URLSearchParams({ magnet: buildMagnet(infoHash, sources) }).toString(),
-            { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+            { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 8000 }
         );
-        const torrentId: string = addRes.data.id;
-        if (!torrentId) return null;
+        torrentId = addRes.data?.id;
+        if (!torrentId) {
+            console.error(`[real-debrid] addMagnet returned no id`);
+            return null;
+        }
 
-        // First info call: list all files, pick the video ones
+        // First info — list files to know which IDs to select
         const firstInfo = await axios.get(`${BASE_URL}/torrents/info/${torrentId}`, { headers, timeout: 5000 });
+        const status0: string = firstInfo.data?.status || '';
         const allFiles: Array<{ id: number; path: string; bytes: number }> = firstInfo.data?.files || [];
+
+        if (status0 === 'magnet_error' || status0 === 'error' || status0 === 'virus' || status0 === 'dead') {
+            console.error(`[real-debrid] ${infoHash} magnet error: ${status0}`);
+            await deleteTorrent(apikey, torrentId);
+            return null;
+        }
+
+        // Select video files (or all if no clear video file)
         const videoFileIds = allFiles
             .filter((f) => VIDEO_EXTENSIONS.test(f.path))
             .map((f) => f.id);
@@ -101,45 +96,58 @@ export async function resolveRealDebrid(
         await axios.post(
             `${BASE_URL}/torrents/selectFiles/${torrentId}`,
             new URLSearchParams({ files: selectIds }).toString(),
-            { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+            { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 8000 }
         );
 
-        const deadline = Date.now() + POLL_TIMEOUT_MS;
-        let links: string[] = [];
-        let filename: string | undefined;
-        let filesize: number | undefined;
+        // Fast poll — cached torrents reach `downloaded` in < 1s after selectFiles.
+        // Anything else (queued/downloading/compressing) means RD started a
+        // background fetch we can't wait for.
+        const deadline = Date.now() + FAST_POLL_TIMEOUT_MS;
+        let downloadedInfo: any = null;
+        let lastStatus = '';
         while (Date.now() < deadline) {
-            const info = await axios.get(`${BASE_URL}/torrents/info/${torrentId}`, { headers, timeout: 5000 });
-            if (info.data && Array.isArray(info.data.links) && info.data.links.length > 0) {
-                links = info.data.links;
-                filename = info.data.filename;
-                filesize = info.data.bytes;
+            const info = await axios.get(`${BASE_URL}/torrents/info/${torrentId}`, { headers, timeout: 4000 });
+            lastStatus = info.data?.status || '';
+            if (lastStatus === 'downloaded' && Array.isArray(info.data.links) && info.data.links.length > 0) {
+                downloadedInfo = info.data;
                 break;
             }
-            if (info.data && info.data.status && /error|magnet_error|virus|dead/.test(info.data.status)) {
-                console.error(`[real-debrid] torrent failed: status=${info.data.status}`);
+            if (/error|magnet_error|virus|dead/.test(lastStatus)) {
+                console.error(`[real-debrid] ${infoHash} status=${lastStatus}`);
+                await deleteTorrent(apikey, torrentId);
                 return null;
             }
-            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+            await new Promise((r) => setTimeout(r, FAST_POLL_INTERVAL_MS));
         }
-        if (links.length === 0) {
-            console.error(`[real-debrid] poll timeout, torrent ${torrentId} didn't produce links`);
+
+        if (!downloadedInfo) {
+            // Not cached — RD is downloading it in background. Delete it so the
+            // user's account isn't polluted with phantom torrents.
+            console.log(`[real-debrid] ${infoHash} NOT cached (status=${lastStatus}), deleting`);
+            await deleteTorrent(apikey, torrentId);
             return null;
         }
 
-        // Pick the largest file's link (usually the main video for single-file packs)
-        const linkToUnrestrict = links[0];
+        // Unrestrict the first link (biggest file in single-file packs).
         const unrestricted = await axios.post(
             `${BASE_URL}/unrestrict/link`,
-            new URLSearchParams({ link: linkToUnrestrict }).toString(),
-            { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+            new URLSearchParams({ link: downloadedInfo.links[0] }).toString(),
+            { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 8000 }
         );
-        if (!unrestricted.data || !unrestricted.data.download) return null;
-        return { url: unrestricted.data.download, filename, filesize };
+        if (!unrestricted.data || !unrestricted.data.download) {
+            console.error(`[real-debrid] unrestrict returned no download url`);
+            return null;
+        }
+        return {
+            url: unrestricted.data.download,
+            filename: downloadedInfo.filename,
+            filesize: downloadedInfo.bytes
+        };
     } catch (err: any) {
         const status = err.response?.status;
         const body = typeof err.response?.data === 'object' ? JSON.stringify(err.response.data) : err.response?.data;
         console.error(`[real-debrid] error status=${status} body=${body}: ${err.message || err}`);
+        if (torrentId) await deleteTorrent(apikey, torrentId);
         return null;
     }
 }

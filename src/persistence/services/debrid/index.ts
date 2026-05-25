@@ -1,4 +1,5 @@
 import { IStream } from '../../models/stream';
+import DebridCache from '../../models/debrid-cache';
 import { resolveRealDebrid } from './real-debrid';
 import { resolveTorBox } from './torbox';
 import { formatStream } from '../stream-formatter';
@@ -11,41 +12,92 @@ export interface DebridConfig {
 }
 
 /**
+ * Hard cap on Debrid attempts per request.
+ *
+ * Each attempt does addMagnet + selectFiles + polls + possibly delete on
+ * Real-Debrid. With 20 candidate streams we'd burn ~100 API calls and
+ * hit Vercel's 60s function timeout. Cap to the top N (already sorted by
+ * quality+seeders upstream).
+ */
+const MAX_DEBRID_ATTEMPTS = parseInt(process.env.MAX_DEBRID_ATTEMPTS || '5', 10);
+
+/**
+ * Cache TTL for "is this hash cached on Debrid?" lookups.
+ * Short because RD's cache state changes over time, but long enough to
+ * absorb burst requests for the same content (Stremio refetches a lot).
+ */
+const DEBRID_CACHE_TTL_MS = parseInt(process.env.DEBRID_CACHE_TTL_MS || `${15 * 60 * 1000}`, 10);
+
+/**
  * Resolve a list of torrent streams into playable HTTP URLs via the configured
  * Debrid provider.
  *
- * Only cached torrents survive — the debrid clients return null for non-cached
- * content so we don't trigger background downloads that would time out the
- * Stremio request.
+ * Optimizations:
+ *   - Skip streams without infoHash up front (cheap filter)
+ *   - Cap to MAX_DEBRID_ATTEMPTS (top-quality streams already first)
+ *   - Consult DebridCache for "we already know this hash isn't cached"
+ *     so repeat requests don't re-test
+ *   - Run attempts in parallel
+ *   - Persist outcome (cached vs not) regardless of success
  *
- * Returned streams use the pretty Mico formatter so users see a Torrentio/Comet-
- * style layout (`[RD ⚡] Mico\n1080p` on the left, structured tech info on the
- * right). `bingeGroup` keeps Stremio's auto-play picking the same release across
- * episodes.
+ * Returned streams use the pretty Mico formatter so users see a Torrentio/
+ * Comet-style layout with the ⚡ Cache marker for confirmed cached releases.
  */
 export async function resolveDebridStreams(streams: Partial<IStream>[], config: DebridConfig): Promise<any[]> {
-    const resolved = await Promise.all(
-        streams.map(async (s) => {
-            const result = await resolveOne(s, config);
-            if (!result) return null;
-            const { name, title } = formatStream({
-                rawTitle: s.title || '',
-                seeders: s.seeders || 0,
-                sizeBytes: (s as any).size,
-                provider: (s as any).provider || 'cache',
-                debrid: { provider: config.provider, cached: true }
-            });
-            return {
-                name,
-                title,
-                url: result.url,
-                behaviorHints: {
-                    notWebReady: false,
-                    bingeGroup: `mico-${config.provider}-${(s.infoHash || '').slice(0, 8)}`
+    const candidates = streams.filter((s) => !!s.infoHash).slice(0, MAX_DEBRID_ATTEMPTS);
+
+    const resolved = await Promise.all(candidates.map(async (s) => {
+        const infoHash = s.infoHash!;
+        const cacheKey = `${config.provider}:${infoHash}`;
+
+        // 1. Cache lookup — known not-cached → skip without hitting Debrid
+        try {
+            const cached = await DebridCache.findOne({ key: cacheKey }).exec();
+            if (cached && cached.expiresAt.getTime() > Date.now() && cached.cached === false) {
+                return null;
+            }
+        } catch (err) {
+            console.error(`[debrid] cache lookup failed: ${err}`);
+        }
+
+        // 2. Try resolve
+        const result = await resolveOne(s, config);
+
+        // 3. Persist outcome
+        DebridCache.updateOne(
+            { key: cacheKey },
+            {
+                $set: {
+                    key: cacheKey,
+                    cached: !!result,
+                    filename: result?.filename,
+                    filesize: result?.filesize,
+                    expiresAt: new Date(Date.now() + DEBRID_CACHE_TTL_MS)
                 }
-            };
-        })
-    );
+            },
+            { upsert: true }
+        ).exec().catch((err) => console.error(`[debrid] cache write failed: ${err}`));
+
+        if (!result) return null;
+
+        const { name, title } = formatStream({
+            rawTitle: s.title || '',
+            seeders: s.seeders || 0,
+            sizeBytes: (s as any).size,
+            provider: (s as any).provider || 'cache',
+            debrid: { provider: config.provider, cached: true }
+        });
+        return {
+            name,
+            title,
+            url: result.url,
+            behaviorHints: {
+                notWebReady: false,
+                bingeGroup: `mico-${config.provider}-${infoHash.slice(0, 8)}`
+            }
+        };
+    }));
+
     return resolved.filter((s): s is any => s !== null);
 }
 
