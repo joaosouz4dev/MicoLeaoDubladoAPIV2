@@ -7,6 +7,7 @@ import Meta from '../../persistence/models/meta';
 import manifest from '../../persistence/models/stub/manifest.json';
 import { getBreakerStates } from '../../persistence/services/providers/circuit-breaker';
 import { listStremioAddonSources } from '../../persistence/services/providers/stremio-addon';
+import { stremthruHealth, stremthruBaseUrl } from '../../persistence/services/debrid/stremthru';
 
 export const dynamic = 'force-dynamic';
 
@@ -120,6 +121,15 @@ async function collectStatus() {
                 latencyMs: Date.now() - start
             };
         }
+    }
+
+    // StremThru
+    const stStart = Date.now();
+    try {
+        const ok = await stremthruHealth();
+        data.checks.stremthru = { ok, base: stremthruBaseUrl(), latencyMs: Date.now() - stStart };
+    } catch (err: any) {
+        data.checks.stremthru = { ok: false, detail: err?.message || String(err), latencyMs: Date.now() - stStart };
     }
 
     // Cinemeta
@@ -293,6 +303,11 @@ function renderHtml(d: any): string {
     ${renderStatCard('Cinemeta', checks.cinemeta, [
         ['Latência', checks.cinemeta?.latencyMs != null ? `${checks.cinemeta.latencyMs}ms` : '—'],
         ['Uso', 'Metadados e fallback de catálogo']
+    ])}
+
+    ${renderStatCard('StremThru (Debrid proxy)', checks.stremthru, [
+        ['Backend', truncate(checks.stremthru?.base, 40)],
+        ['Latência', checks.stremthru?.latencyMs != null ? `${checks.stremthru.latencyMs}ms` : '—']
     ])}
 
     ${renderBreakers(d.breakers)}

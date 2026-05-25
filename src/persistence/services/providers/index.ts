@@ -11,6 +11,8 @@ import { fetchFromTorrentIndexer } from './torrent-indexer';
 import { fetchFromTorrentio } from './torrentio';
 import { fetchFromThePirataFilmes } from './thepiratafilmes';
 import { fetchFromStremioAddons } from './stremio-addon';
+import { fetchFromKnaben } from './knaben';
+import { fetchFromNyaa } from './nyaa';
 import SearchCache from '../../models/search-cache';
 import type { NormalizedStream } from './types';
 
@@ -84,7 +86,9 @@ async function fetchAndCache(type: 'movie' | 'series', stremioId: string): Promi
         const promises: Promise<NormalizedStream[]>[] = [
             fetchFromTorrentIndexer(imdbId, type, stremioId),
             fetchFromThePirataFilmes(imdbId),
-            fetchFromStremioAddons(type, stremioId)
+            fetchFromStremioAddons(type, stremioId),
+            fetchFromKnaben(imdbId, type, stremioId),
+            fetchFromNyaa(imdbId, type, stremioId)
         ];
         if (TORRENTIO_ENABLED) promises.push(fetchFromTorrentio(type, stremioId));
         const settled = await Promise.allSettled(promises);
