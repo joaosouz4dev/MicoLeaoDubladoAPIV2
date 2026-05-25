@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 /**
  * Stream describes a multimedia content and how to download/play it.
- * A multimedia title may contains multiple streams associated with it.
+ * A multimedia title may contain multiple streams associated with it.
  */
 export interface IStream extends Document {
     metaId: string
@@ -10,11 +10,12 @@ export interface IStream extends Document {
     title: string
     infoHash: string
     sources: string[]
-    seeders?: number
+    seeders: number
     fileIdx?: number
     episode?: number
     season?: number
     size?: number
+    updatedAt: Date
 }
 /**
  * Extract and merge informations from a stream to create its streamId (defined at Stremio Addon SDK documentation)
@@ -69,16 +70,22 @@ export const StreamSchema: Schema = new Schema({
     },
     seeders: {
         type: 'Number',
-        required: false
+        required: false,
+        default: 0
     },
     size: {
         type: 'Number',
         required: false
+    },
+    updatedAt: {
+        type: 'Date',
+        required: false,
+        default: () => new Date()
     }
 });
 
 StreamSchema.static("generateStreamId", generateStreamId);
 
-const Stream: Model<IStream> = mongoose.model<IStream>('Stream', StreamSchema);
+const Stream: Model<IStream> = mongoose.models.Stream as Model<IStream> || mongoose.model<IStream>('Stream', StreamSchema);
 
 export default Stream;

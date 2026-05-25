@@ -1,57 +1,87 @@
-# Mico Leão Dublado **API**
+# Mico Leão Dublado **API V2**
 
 ![Mico Leão Dublado Logo](./assets/logo.jpg)
 
-[![Automated tests](https://github.com/victorgveloso/MicoLeaoDubladoAPI/actions/workflows/test.yml/badge.svg)](https://github.com/victorgveloso/MicoLeaoDubladoAPI/actions/workflows/test.yml)
-[![Check test server health](https://github.com/victorgveloso/MicoLeaoDubladoAPI/actions/workflows/healthcheck.yml/badge.svg)](https://github.com/victorgveloso/MicoLeaoDubladoAPI/actions/workflows/healthcheck.yml)
-[![Publish Typedoc to Github Pages](https://github.com/victorgveloso/MicoLeaoDubladoAPI/actions/workflows/docs.yml/badge.svg)](https://github.com/victorgveloso/MicoLeaoDubladoAPI/actions/workflows/docs.yml)
-[![codecov](https://codecov.io/gh/victorgveloso/MicoLeaoDubladoAPI/branch/main/graph/badge.svg?token=YZPBWPGXRM)](https://codecov.io/gh/victorgveloso/MicoLeaoDubladoAPI)
+> **Sucessor independente** do projeto [`victorgveloso/MicoLeaoDubladoAPI`](https://github.com/victorgveloso/MicoLeaoDubladoAPI) — reescrito em Next.js 14, com suporte Debrid (Real-Debrid, TorBox) e deploy serverless na Vercel.
 
-Mico Leão Dublado is a stateful service for multimedia's torrent magnet storage. Relying on MongoDB the magnets are stored in accordance with the Stremio's standards. Adding and searching content is straightforward and it is described further at [Section Using](#using).
+Mico Leão Dublado V2 é uma API stateless para armazenamento e distribuição de torrent magnets de conteúdo dublado em português brasileiro, em conformidade com o padrão Stremio Addon SDK. Os magnets são armazenados no MongoDB Atlas e os streams podem ser entregues diretamente como torrent ou via provedores Debrid (cacheados, mais rápidos).
 
-This project adheres to the Contributor Covenant
-[code of conduct](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/master/CODE_OF_CONDUCT.md).
-By participating, you are expected to uphold this code.
+## Créditos
+
+Este projeto é um **sucessor independente** do original [`victorgveloso/MicoLeaoDubladoAPI`](https://github.com/victorgveloso/MicoLeaoDubladoAPI), licenciado sob Apache 2.0. O design dos models (`Meta`, `Stream`, `Catalog`, `Manifest`), assemblers de DTO e a estrutura geral da camada de persistência foram preservados — o crédito pelo trabalho fundacional é do autor original, **Victor G. Veloso**.
+
+A partir desta V2, a base de código diverge significativamente do upstream:
+
+- Migração de Express → **Next.js 14 (App Router)** + serverless functions
+- Suporte a **Debrid** (Real-Debrid + TorBox) — atendendo à [issue #8](https://github.com/victorgveloso/MicoLeaoDubladoAPI/issues/8) do upstream, aberta desde 2022 sem resposta
+- **Tracker scrape** nativo para refresh on-demand de seeders
+- **`StreamController`** acima do DAO com formatação de título e cache temporal de seeders
+- Página `/configure` no padrão Stremio (config codificada na URL, sem sessão server-side)
+- Deploy serverless na Vercel + MongoDB Atlas com connection caching
+
+A LICENSE Apache 2.0 do projeto original é mantida — veja [LICENSE](./LICENSE).
+
+## Novidades da V2
+
+- **Next.js 14 (App Router)** + deploy serverless na **Vercel**
+- **Seeders ao vivo** via tracker scrape (UDP/HTTP/HTTPS BEP 48), refresh on-demand a cada 30 dias (configurável via `SEEDERS_REFRESH_MS`)
+- **`StreamController`** envolve o DAO, formata título com contagem 👥 de seeders
+- **Suporte Debrid**: Real-Debrid e TorBox via URL configurável (Stremio standard `/<provider>-<apikey>/manifest.json`)
+- Página `/configure` para gerar manifest URL personalizada
+- **MongoDB Atlas** com connection caching global para serverless
+
+Veja [DEPLOY.md](./DEPLOY.md) para instruções de deploy na Vercel.
 
 ## Dependencies
-  * NodeJS
-  * TypeScript
-  * Docker (with docker-compose)
+
+* NodeJS 18+
+* MongoDB (Atlas para produção; local para desenvolvimento)
+
 ## Running
-  * Run:
+
 ```sh
-make start # to start
-make test # to run automated tests
-make clean # to delete data, cache and docker image
-make # to run all three commands in the order: clean -> test -> start
+npm install
+cp .env.example .env       # configure MONGODB_URI
+npm run dev                # dev server (Next.js) em http://localhost:3000
+npm run build && npm start # production build
+npm test                   # rodar testes
 ```
 
 ## Using
-Mico Leão Dublado API is a HTTP API (use an HTTP client of your choice).
 
-### Entrypoints
-|Verb|path                                             |request body|request example|response example|response model|
-|----|-------------------------------------------------|------------|------------|----------------|--------------|
-|GET | /manifest.json                                  | X          | X          |  [/src/persistence/models/stub/manifest.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/manifest.json) | [/src/persistence/models/manifest.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/manifest.ts) |
-|GET | /stream/series/{imdbId}:{season}:{episode}.json | X          | X          |  [/src/persistence/models/stub/stream.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/stream.json) | [/src/persistence/models/stream.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stream.ts) |
-|GET | /meta/series/{imdbId}.json                      | X          | X          |  [/src/persistence/models/stub/meta.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/meta.json) | [/src/persistence/models/meta.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/meta.ts) |
-|GET | /catalog/series/{imdbId}/{extra?}.json          | X          | X          |  [/src/persistence/models/stub/catalog.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/catalog.json) | [/src/persistence/models/catalog.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/catalog.ts) |
-|GET | /stream/movie/{imdbId}.json                     | X          | X          |  [/src/persistence/models/stub/stream.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/stream.json) | [/src/persistence/models/stream.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stream.ts) |
-|GET | /meta/movie/{imdbId}.json                       | X          | X          |  [/src/persistence/models/stub/meta.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/meta.json) | [/src/persistence/models/meta.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/meta.ts) |
-|GET | /catalog/movie/{imdbId}/{extra?}.json           | X          | X          |  [/src/persistence/models/stub/catalog.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/catalog.json) | [/src/persistence/models/catalog.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/catalog.ts) |
-|POST| /movie                                          |[/src/persistence/models/transfer-objects/movie.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/transfer-objects/movie.ts)|[/src/persistence/models/stub/movie.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/movie.json)| X  | X  |
-|POST| /series                                          |[/src/persistence/models/transfer-objects/series.ts](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/transfer-objects/movseriesie.ts)|[/src/persistence/models/stub/series.json](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/main/src/persistence/models/stub/series.json)| X  | X  |
+Mico Leão Dublado API V2 é uma HTTP API (use um HTTP client de sua escolha).
+
+### Endpoints
+
+| Verb | Path                                                          | Descrição                                                   |
+|------|---------------------------------------------------------------|-------------------------------------------------------------|
+| GET  | `/`                                                           | Redireciona para `/configure`                               |
+| GET  | `/configure`                                                  | Página de configuração Debrid                               |
+| GET  | `/manifest.json`                                              | Manifest sem Debrid                                         |
+| GET  | `/<provider>-<apikey>/manifest.json`                          | Manifest com Debrid embutido                                |
+| GET  | `/stream/movie/<imdbId>.json`                                 | Streams torrent diretos (filme)                             |
+| GET  | `/stream/series/<imdbId>:<season>:<episode>.json`             | Streams torrent diretos (episódio)                          |
+| GET  | `/<provider>-<apikey>/stream/movie/<imdbId>.json`             | Streams via Debrid (filme)                                  |
+| GET  | `/<provider>-<apikey>/stream/series/<imdbId>:<s>:<e>.json`    | Streams via Debrid (episódio)                               |
+| GET  | `/catalog/<type>/<catalogId>.json`                            | Catálogo                                                    |
+| GET  | `/catalog/<type>/<catalogId>/<extra>.json`                    | Catálogo com filtros (`search=`, `genre=`, `skip=`)         |
+| GET  | `/meta/<type>/<imdbId>.json`                                  | Metadata                                                    |
+| POST | `/movie`                                                      | Inserir filme — body: [`MovieDTO`](src/persistence/models/transfer-objects/movie.ts) |
+| POST | `/series`                                                     | Inserir série — body: [`SeriesDTO`](src/persistence/models/transfer-objects/series.ts) |
+
+### Provedores Debrid suportados
+
+| Provider     | Valor `<provider>` | Onde obter API key                              |
+|--------------|--------------------|-------------------------------------------------|
+| Real-Debrid  | `realdebrid`       | <https://real-debrid.com/apitoken>              |
+| TorBox       | `torbox`           | <https://torbox.app/settings>                   |
 
 ## Contributing
 
-If you are interested in reporting/fixing issues and contributing directly to the code base, please see [CONTRIBUTING.md](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/master/CONTRIBUTING.md) for more information on what we're looking for and how to get started.
-
-## Reference
-
-You might be interested in the Mico Leão Dublados API's reference documentation. It is hosted using Github Pages and it is [available here](https://victorgveloso.github.io/MicoLeaoDubladoAPI/).
+Issues e PRs são bem-vindos. Veja [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Community
 
-You might find us in the [StremioAddons Discord Server](https://discord.gg/WTqVGKXh) and in [r/StremioAddons](https://reddit.com/r/StremioAddons/).
+Você pode nos encontrar no [Stremio Addons Discord Server](https://discord.gg/WTqVGKXh) e em [r/StremioAddons](https://reddit.com/r/StremioAddons/).
 
-### License: [Apache](https://github.com/victorgveloso/MicoLeaoDubladoAPI/blob/master/LICENSE)
+### License: [Apache 2.0](./LICENSE) (herdada do projeto original)

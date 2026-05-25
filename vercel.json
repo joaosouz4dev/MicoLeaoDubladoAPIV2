@@ -1,0 +1,16 @@
+{
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "framework": "nextjs",
+    "name": "MicoLeaoDubladoAPIV2",
+    "regions": ["gru1"],
+    "headers": [
+        {
+            "source": "/(.*)",
+            "headers": [
+                { "key": "Access-Control-Allow-Origin", "value": "*" },
+                { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+                { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+        }
+    ]
+}

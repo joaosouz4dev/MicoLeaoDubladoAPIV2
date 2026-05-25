@@ -1,4 +1,4 @@
-import { Schema, model, Model } from 'mongoose';
+import mongoose, { Schema, model, Model } from 'mongoose';
 import { ContentType } from './stremio';
 /**
  * Catalog is a collection of multimedia of the same type (movie or series)
@@ -33,6 +33,6 @@ export const CatalogSchema: Schema = new Schema({
         required: false
     }
 });
-const Catalog: Model<ICatalog> = model<ICatalog>('Catalog', CatalogSchema);
+const Catalog: Model<ICatalog> = (mongoose.models.Catalog as Model<ICatalog>) || model<ICatalog>('Catalog', CatalogSchema);
 
 export default Catalog;

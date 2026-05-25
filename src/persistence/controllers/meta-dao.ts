@@ -31,7 +31,7 @@ export default class MetaDAO {
         }
     }
     async update(meta: IMeta) {
-        return Meta.update({ id: meta.id }, meta).exec();
+        return Meta.updateOne({ id: meta.id }, meta).exec();
     }
     async upsert(meta: IMeta) {
         let exists = await this.getById(meta.id);

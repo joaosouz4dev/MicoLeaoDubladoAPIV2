@@ -1,8 +1,9 @@
 import MetaDAO from './persistence/controllers/meta-dao';
-import StreamDAO from './persistence/controllers/stream-dao';
+import StreamController from './persistence/controllers/stream-controller';
 import { IMeta } from './persistence/models/meta';
 import { IStream } from './persistence/models/stream';
 import { Args } from './persistence/models/stremio';
+import { resolveDebridStreams, DebridConfig } from './persistence/services/debrid';
 /**
  * Addon's controller for catalog-related requests
  * @param args Arguments documented at [Stremio's SDK Reference](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/requests/defineCatalogHandler.md)
@@ -50,15 +51,25 @@ export async function createCatalogHandler(args: Args): Promise<{ metas: IMeta[]
 /**
  * Addon's controller for stream-related requests
  * @param args Arguments documented at [Stremio's SDK Reference](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/requests/defineStreamHandler.md)
+ * @param debridConfig Optional per-request Debrid config (apikey + provider) parsed from the request URL.
  * @returns A list of streams of movie and series.
  */
-export async function createStreamHandler(args: Args) : Promise<{ streams: IStream[] }> {
-    let streamDao = new StreamDAO();
-    let result: { streams: IStream[] } = { streams: [] };
+export async function createStreamHandler(args: Args, debridConfig?: DebridConfig) : Promise<{ streams: any[] }> {
+    let streamController = new StreamController();
+    let streams: IStream[] = [];
     try {
-        result = { streams: await streamDao.getByStreamId(args.id) };
+        streams = await streamController.getByStreamId(args.id);
     } catch (error) {
         console.error(`Stream Handler ERROR: ${error}`);
+        return { streams: [] };
     }
-    return result;
+
+    if (debridConfig && debridConfig.apikey && debridConfig.provider) {
+        try {
+            return { streams: await resolveDebridStreams(streams, debridConfig) };
+        } catch (error) {
+            console.error(`Debrid resolution failed, falling back to torrent: ${error}`);
+        }
+    }
+    return { streams };
 }

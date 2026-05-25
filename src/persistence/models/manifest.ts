@@ -1,4 +1,4 @@
-import { Schema, model, Model, Document } from 'mongoose';
+import mongoose, { Schema, model, Model, Document } from 'mongoose';
 import { CatalogSchema, ICatalog } from "./catalog";
 import { ContentType, ShortManifestResource } from './stremio';
 /**
@@ -51,6 +51,6 @@ export const ManifestSchema: Schema = new Schema({
     },
 });
 
-const Manifest: Model<IManifest> = model<IManifest>('Manifest', ManifestSchema);
+const Manifest: Model<IManifest> = (mongoose.models.Manifest as Model<IManifest>) || model<IManifest>('Manifest', ManifestSchema);
 
 export default Manifest;

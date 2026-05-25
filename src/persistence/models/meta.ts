@@ -1,4 +1,4 @@
-import { Schema, model } from 'mongoose';
+import mongoose, { Schema, model } from 'mongoose';
 import { ContentType } from './stremio';
 /**
  * Meta represents all metadata related to a multimedia title (movie or series).
@@ -69,6 +69,6 @@ export const MetaSchema: Schema = new Schema({
     }
 });
 
-const Meta = model('Meta', MetaSchema);
+const Meta = mongoose.models.Meta || model('Meta', MetaSchema);
 
 export default Meta;
