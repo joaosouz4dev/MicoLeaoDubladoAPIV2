@@ -9,6 +9,7 @@
 import axios from 'axios';
 import { decode } from 'magnet-uri';
 import type { NormalizedStream } from './types';
+import { withBreaker } from './circuit-breaker';
 
 const BASES = (process.env.PIRATAFILMES_BASE || [
     'https://www.thepiratafilmes.online',
@@ -64,28 +65,31 @@ function toNormalized(r: PirataResult): NormalizedStream | null {
 }
 
 /**
- * Fetch from ThePirataFilmes API. The API has both endpoints `imdbid` and `q`
- * — IMDb is more reliable when available. Tries multiple mirrors.
+ * Fetch from ThePirataFilmes API. Tries multiple mirrors. Wrapped in a
+ * circuit breaker so repeated failures (mirror outages) don't keep paying
+ * timeout on every request.
  */
 export async function fetchFromThePirataFilmes(imdbId: string): Promise<NormalizedStream[]> {
-    for (const base of BASES) {
-        const url = `${base}/api/search?imdbid=${encodeURIComponent(imdbId)}`;
-        try {
-            const res = await axios.get(url, {
-                timeout: 7000,
-                headers: { 'User-Agent': UA, Accept: 'application/json' }
-            });
-            const results: PirataResult[] = Array.isArray(res.data?.results) ? res.data.results : [];
-            const normalized = results
-                .map(toNormalized)
-                .filter((s): s is NormalizedStream => s !== null);
-            if (normalized.length > 0) {
-                console.log(`[thepiratafilmes] ${base}: ${normalized.length} streams for ${imdbId}`);
-                return normalized;
+    return withBreaker('thepiratafilmes', async () => {
+        for (const base of BASES) {
+            const url = `${base}/api/search?imdbid=${encodeURIComponent(imdbId)}`;
+            try {
+                const res = await axios.get(url, {
+                    timeout: 7000,
+                    headers: { 'User-Agent': UA, Accept: 'application/json' }
+                });
+                const results: PirataResult[] = Array.isArray(res.data?.results) ? res.data.results : [];
+                const normalized = results
+                    .map(toNormalized)
+                    .filter((s): s is NormalizedStream => s !== null);
+                if (normalized.length > 0) {
+                    console.log(`[thepiratafilmes] ${base}: ${normalized.length} streams for ${imdbId}`);
+                    return normalized;
+                }
+            } catch (err: any) {
+                console.error(`[thepiratafilmes] ${base} failed status=${err.response?.status}: ${err.message || err}`);
             }
-        } catch (err: any) {
-            console.error(`[thepiratafilmes] ${base} failed status=${err.response?.status}: ${err.message || err}`);
         }
-    }
-    return [];
+        return [];
+    });
 }

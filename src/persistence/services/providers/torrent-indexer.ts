@@ -19,6 +19,8 @@ import { decode } from 'magnet-uri';
 import type { NormalizedStream } from './types';
 import { fetchCinemeta } from '../cinemeta';
 import { lookupTitles, tmdbAvailable } from '../tmdb';
+import { buildQueryVariants, QueryContext } from './query-builder';
+import { withBreaker } from './circuit-breaker';
 
 const BASE = process.env.TORRENT_INDEXER_BASE || 'https://torrent-indexer.darklyn.org';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Stremio/4.4 MicoLeaoV2';
@@ -121,44 +123,58 @@ async function fetchOne(url: string, providerLabel: string): Promise<NormalizedS
 }
 
 /**
- * Fetch streams from torrent-indexer for a given IMDb id.
+ * Fetch streams from torrent-indexer for a given Stremio id (movie or episode).
  *
- * Order of attempts:
- *   1. Look up PT-BR title (via TMDB when available) + original title.
- *      BR torrents are usually named in PT-BR, so the PT-BR query hits.
- *      Some releases ship under the original title, so try both.
- *   2. Unified /search?q=<title>&audio=por for each title
- *   3. Per-sub-indexer fan-out as last resort
+ * Strategy:
+ *   1. Resolve query context (PT-BR + original titles, year, season/episode)
+ *      from TMDB / Cinemeta
+ *   2. Generate up to ~12 query variants via buildQueryVariants
+ *   3. Try /search?q=<variant> in order until one returns results
+ *   4. If still empty, fan out to each sub-indexer with the first variant
+ *   5. The whole call is wrapped in a circuit breaker so failures don't
+ *      block subsequent requests
  */
 export async function fetchFromTorrentIndexer(
     imdbId: string,
-    type: 'movie' | 'series' = 'movie'
+    type: 'movie' | 'series' = 'movie',
+    streamId?: string
 ): Promise<NormalizedStream[]> {
-    const titles = await resolveTitles(imdbId, type);
-    if (titles.length === 0) {
+    return withBreaker('torrent-indexer', () => fetchInner(imdbId, type, streamId));
+}
+
+async function fetchInner(
+    imdbId: string,
+    type: 'movie' | 'series',
+    streamId?: string
+): Promise<NormalizedStream[]> {
+    const ctx = await resolveQueryContext(imdbId, type, streamId);
+    if (!ctx.ptBr && !ctx.original) {
         console.warn(`[torrent-indexer] no title resolved for ${imdbId}`);
         return [];
     }
+    const variants = buildQueryVariants(ctx);
+    if (variants.length === 0) return [];
+    console.log(`[torrent-indexer] ${imdbId}: ${variants.length} query variants`);
 
     const audioFilter = '&audio=por,brazilian';
 
-    // 1. Unified search — try each candidate title until one returns results
-    for (const title of titles) {
-        const q = encodeURIComponent(title);
+    // 1. Unified search — try each variant until one hits
+    for (const v of variants) {
+        const q = encodeURIComponent(v);
         const found = await fetchOne(
             `${BASE}/search?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`,
             'torrent-indexer'
         );
         if (found.length > 0) {
-            console.log(`[torrent-indexer] "${title}" via /search: ${found.length} PT-BR streams`);
+            console.log(`[torrent-indexer] "${v}" via /search: ${found.length} PT-BR streams`);
             return found;
         }
     }
 
-    // 2. Per-sub-indexer fan-out, with the first title only (to bound cost)
-    const fallbackTitle = titles[0];
-    const q = encodeURIComponent(fallbackTitle);
-    console.log(`[torrent-indexer] /search empty for ${imdbId}, fanning out to sub-indexers with "${fallbackTitle}"`);
+    // 2. Per-sub-indexer fan-out with the first (most specific) variant
+    const fallback = variants[0];
+    const q = encodeURIComponent(fallback);
+    console.log(`[torrent-indexer] /search empty for ${imdbId}, fanning out with "${fallback}"`);
     const settled = await Promise.allSettled(
         SUB_INDEXERS.map((name) =>
             fetchOne(`${BASE}/indexers/${name}?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`, `ti:${name}`)
@@ -168,33 +184,35 @@ export async function fetchFromTorrentIndexer(
     for (const r of settled) {
         if (r.status === 'fulfilled') all.push(...r.value);
     }
-    console.log(`[torrent-indexer] "${fallbackTitle}" via sub-indexers: ${all.length} PT-BR streams`);
+    console.log(`[torrent-indexer] "${fallback}" via sub-indexers: ${all.length} PT-BR streams`);
     return all;
 }
 
 /**
- * Resolve candidate titles for an IMDb id, in priority order.
- * TMDB (when configured) returns both PT-BR and original; otherwise we fall
- * back to Cinemeta's English name. We dedupe and skip empties.
+ * Resolve all the fields the query builder needs: PT-BR title (via TMDB when
+ * available), original title, year, and — for series — season/episode parsed
+ * from the Stremio id (format "ttXXXX:S:E").
  */
-async function resolveTitles(imdbId: string, type: 'movie' | 'series'): Promise<string[]> {
-    const candidates: (string | undefined)[] = [];
+async function resolveQueryContext(
+    imdbId: string,
+    type: 'movie' | 'series',
+    streamId?: string
+): Promise<QueryContext> {
+    const ctx: QueryContext = {};
+    if (streamId && type === 'series') {
+        const parts = streamId.split(':');
+        if (parts[1]) ctx.season = parseInt(parts[1], 10) || undefined;
+        if (parts[2]) ctx.episode = parseInt(parts[2], 10) || undefined;
+    }
     if (tmdbAvailable()) {
         const t = await lookupTitles(imdbId, type);
-        candidates.push(t.ptBr, t.original);
+        ctx.ptBr = t.ptBr;
+        ctx.original = t.original;
     }
-    if (candidates.length === 0 || candidates.every((c) => !c)) {
+    if (!ctx.ptBr && !ctx.original) {
         const cm = await fetchCinemeta(type, imdbId);
-        candidates.push(cm?.name);
+        ctx.ptBr = cm?.name;
+        if (cm?.releaseInfo) ctx.year = cm.releaseInfo.slice(0, 4);
     }
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const c of candidates) {
-        if (!c) continue;
-        const key = c.trim().toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(c.trim());
-    }
-    return out;
+    return ctx;
 }

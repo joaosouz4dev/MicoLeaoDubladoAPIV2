@@ -5,6 +5,7 @@ import { connect } from '../../config';
 import Stream from '../../persistence/models/stream';
 import Meta from '../../persistence/models/meta';
 import manifest from '../../persistence/models/stub/manifest.json';
+import { getBreakerStates } from '../../persistence/services/providers/circuit-breaker';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,6 +132,9 @@ async function collectStatus() {
     } catch (err: any) {
         data.checks.cinemeta = { ok: false, detail: err.message || String(err), latencyMs: Date.now() - cmStart };
     }
+
+    // Circuit breaker states
+    data.breakers = getBreakerStates();
 
     // Manifest sanity
     data.checks.manifest = {
@@ -289,6 +293,8 @@ function renderHtml(d: any): string {
         ['Uso', 'Metadados e fallback de catálogo']
     ])}
 
+    ${renderBreakers(d.breakers)}
+
     <div class="card">
       <h2><span class="dot ${checks.manifest.ok ? 'ok' : 'bad'}"></span>Manifest</h2>
       <div class="row"><span class="key">Catálogos</span><span class="val">${escapeHtml(checks.manifest.catalogs)}</span></div>
@@ -312,6 +318,26 @@ function renderHtml(d: any): string {
 </div>
 </body>
 </html>`;
+}
+
+function renderBreakers(breakers: any[] | undefined): string {
+    if (!breakers || breakers.length === 0) {
+        return `<div class="card">
+          <h2><span class="dot ok"></span>Circuit breakers</h2>
+          <div class="row"><span class="key">Estado</span><span class="val dim">Nenhum disparado</span></div>
+        </div>`;
+    }
+    const anyOpen = breakers.some((b) => b.openFor != null);
+    const rows = breakers.map((b) => {
+        const status = b.openFor != null
+            ? `aberto há ${b.openFor}s`
+            : b.failures > 0 ? `${b.failures} falhas` : 'ok';
+        return `<div class="row"><span class="key">${escapeHtml(b.name)}</span><span class="val">${escapeHtml(status)}</span></div>`;
+    }).join('');
+    return `<div class="card">
+      <h2><span class="dot ${anyOpen ? 'warn' : 'ok'}"></span>Circuit breakers</h2>
+      ${rows}
+    </div>`;
 }
 
 function renderStatCard(title: string, check: Check & Record<string, any> | undefined, rows: [string, any][]) {
