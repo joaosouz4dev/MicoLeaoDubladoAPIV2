@@ -8,8 +8,22 @@
  *
  * Stremio includes that prefix on every subsequent /stream/... request, so the
  * config travels with each request — no server-side session needed.
+ *
+ * When the page is reached via `/<provider>-<apikey>/configure` (Stremio's
+ * "edit config" deep link), `initial` arrives populated and the page boots
+ * in edit mode: the provider chip is pre-selected and the apikey input is
+ * pre-filled so the user can rotate the key or change providers without
+ * retyping.
  */
-export function renderConfigurePage(host: string): string {
+export interface ConfigureInitialValue {
+    provider: 'realdebrid' | 'torbox';
+    apikey: string;
+}
+
+export function renderConfigurePage(host: string, initial?: ConfigureInitialValue | null): string {
+    const initialJson = initial
+        ? JSON.stringify({ provider: initial.provider, apikey: initial.apikey })
+        : 'null';
     return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -234,7 +248,7 @@ export function renderConfigurePage(host: string): string {
       </div>
     </div>
 
-    <p class="lede">
+    <p class="lede" id="lede">
       Opcionalmente conecte um provedor Debrid para streams cacheados e instantâneos —
       sem download torrent local.
     </p>
@@ -286,6 +300,7 @@ export function renderConfigurePage(host: string): string {
 
 <script>
   const host = ${JSON.stringify(host)};
+  const initial = ${initialJson};
   const APIKEY_LINKS = {
     realdebrid: {
       url: 'https://real-debrid.com/apitoken',
@@ -380,6 +395,34 @@ export function renderConfigurePage(host: string): string {
     }
   });
 
+  /**
+   * Boot with the initial config when present (Stremio edit-config deep link).
+   * Selects the provider chip and pre-fills the apikey so the user can
+   * rotate the key or change providers without retyping.
+   */
+  function applyInitial() {
+    if (!initial || !initial.provider) return;
+    const btn = document.querySelector('.provider-btn[data-provider="' + initial.provider + '"]');
+    if (!btn) return;
+    providerBtns.forEach((b) => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedProvider = initial.provider;
+    if (APIKEY_LINKS[selectedProvider]) {
+      apikeySection.classList.remove('hidden');
+      const info = APIKEY_LINKS[selectedProvider];
+      apikeyLink.innerHTML =
+        '<span class="icon">🔑</span>' +
+        '<a href="' + info.url + '" target="_blank" rel="noopener">' + info.label + ' ↗</a>';
+    }
+    if (initial.apikey) apikeyInput.value = initial.apikey;
+    // Show a "Currently installed" hint so it's obvious this is edit mode
+    const lede = document.getElementById('lede');
+    if (lede) {
+      lede.textContent = 'Edite sua configuração atual. O link de instalação abaixo refletirá as mudanças.';
+    }
+  }
+
+  applyInitial();
   updateGenerateButtonState();
 </script>
 </body>

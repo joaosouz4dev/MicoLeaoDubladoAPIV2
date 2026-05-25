@@ -50,7 +50,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         if (resource === 'catalog')   return await handleCatalogRoute(route);
         if (resource === 'stream')    return await handleStreamRoute(route, debridConfig);
         if (resource === 'meta')      return await handleMetaRoute(route);
-        if (resource === 'configure') return handleConfigureRoute(req);
+        if (resource === 'configure') return handleConfigureRoute(req, debridConfig);
 
         return NextResponse.json({ error: 'Not found', path: route }, { status: 404 });
     } catch (err: any) {
@@ -91,13 +91,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
 /**
  * Render the configure page for /<config>/configure URLs (Stremio appends
  * /configure to the manifest URL when the user clicks the gear icon).
+ * When config is present in the URL, the page boots in edit mode with
+ * the provider chip selected and the apikey pre-filled.
+ *
  * The standalone /configure route at app/configure/route.ts handles the
  * no-prefix case.
  */
-function handleConfigureRoute(req: NextRequest): Response {
+function handleConfigureRoute(req: NextRequest, debridConfig: DebridConfig | null): Response {
     const host = req.headers.get('host') || 'localhost:3000';
     const proto = req.headers.get('x-forwarded-proto') || (host.startsWith('localhost') ? 'http' : 'https');
-    return new Response(renderConfigurePage(`${proto}://${host}`), {
+    return new Response(renderConfigurePage(`${proto}://${host}`, debridConfig), {
         headers: { 'Content-Type': 'text/html; charset=utf-8' }
     });
 }
