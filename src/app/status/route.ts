@@ -61,21 +61,28 @@ export async function GET(_req: NextRequest) {
         };
     }
 
-    // 3. Torrentio reachability — must send a browser-like UA or it returns 403.
-    const torrentioStart = Date.now();
-    try {
-        const r = await axios.get('https://torrentio.strem.fun/manifest.json', {
-            timeout: 5000,
-            headers: { 'User-Agent': 'Stremio/4.4.x (MicoLeaoDubladoAPIV2)' }
-        });
-        result.checks.torrentio = { ok: r.status === 200, latencyMs: Date.now() - torrentioStart };
-    } catch (err: any) {
-        result.checks.torrentio = {
-            ok: false,
-            status: err.response?.status,
-            error: String(err?.message || err),
-            latencyMs: Date.now() - torrentioStart
-        };
+    // 3. Upstream addon mirrors — Torrentio blocks Vercel IPs (403), so we
+    //    also probe KnightCrawler / MediaFusion which we use as fallbacks.
+    const upstreams = [
+        { name: 'torrentio', url: 'https://torrentio.strem.fun/manifest.json' },
+        { name: 'knightcrawler', url: 'https://knightcrawler.elfhosted.com/manifest.json' },
+        { name: 'mediafusion', url: 'https://mediafusion.elfhosted.com/manifest.json' }
+    ];
+    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Stremio/4.4';
+    result.checks.upstreams = {};
+    for (const u of upstreams) {
+        const start = Date.now();
+        try {
+            const r = await axios.get(u.url, { timeout: 5000, headers: { 'User-Agent': ua } });
+            result.checks.upstreams[u.name] = { ok: r.status === 200, latencyMs: Date.now() - start };
+        } catch (err: any) {
+            result.checks.upstreams[u.name] = {
+                ok: false,
+                status: err.response?.status,
+                error: String(err?.message || err),
+                latencyMs: Date.now() - start
+            };
+        }
     }
 
     // 4. Cinemeta reachability

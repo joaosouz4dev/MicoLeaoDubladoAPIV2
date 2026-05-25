@@ -10,10 +10,20 @@
 import axios from 'axios';
 import Stream, { IStream } from '../models/stream';
 
-const TORRENTIO_BASE = process.env.TORRENTIO_BASE || 'https://torrentio.strem.fun';
+/**
+ * Torrentio (and similar addons) block requests from cloud-provider IP ranges
+ * with HTTP 403. We try a list of compatible endpoints in order; the first one
+ * that responds wins. KnightCrawler is a community fork with the same /stream
+ * shape and is generally more permissive.
+ */
+const UPSTREAM_BASES = (process.env.TORRENTIO_BASE || [
+    'https://torrentio.strem.fun',
+    'https://knightcrawler.elfhosted.com',
+    'https://mediafusion.elfhosted.com'
+].join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+
 const REQUEST_HEADERS = {
-    // Torrentio rejects requests without a browser-like User-Agent (returns 403).
-    'User-Agent': 'Stremio/4.4.x (MicoLeaoDubladoAPIV2)',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Stremio/4.4',
     'Accept': 'application/json',
     'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
 };
@@ -53,15 +63,19 @@ function isPortugueseDub(stream: TorrentioStream): boolean {
  * Returns the raw Torrentio payload — no filtering.
  */
 async function fetchTorrentioRaw(type: 'movie' | 'series', stremioId: string): Promise<TorrentioStream[]> {
-    const url = `${TORRENTIO_BASE}/stream/${type}/${encodeURIComponent(stremioId)}.json`;
-    try {
-        const res = await axios.get(url, { timeout: 8000, headers: REQUEST_HEADERS });
-        return Array.isArray(res.data?.streams) ? res.data.streams : [];
-    } catch (err: any) {
-        const status = err.response?.status;
-        console.error(`[torrentio] fetch failed (${url}) status=${status}: ${err.message || err}`);
-        return [];
+    for (const base of UPSTREAM_BASES) {
+        const url = `${base}/stream/${type}/${encodeURIComponent(stremioId)}.json`;
+        try {
+            const res = await axios.get(url, { timeout: 8000, headers: REQUEST_HEADERS });
+            const streams = Array.isArray(res.data?.streams) ? res.data.streams : [];
+            console.log(`[torrentio] ${base} → ${streams.length} streams for ${stremioId}`);
+            if (streams.length > 0) return streams;
+        } catch (err: any) {
+            const status = err.response?.status;
+            console.error(`[torrentio] ${base} failed status=${status}: ${err.message || err}`);
+        }
     }
+    return [];
 }
 
 /**
