@@ -7,6 +7,7 @@ import disassembleMovie from '../../persistence/controllers/movie-assembler';
 import disassembleSeries from '../../persistence/controllers/series-assembler';
 import StreamDAO from '../../persistence/controllers/stream-dao';
 import { parseDebridConfig, resolveDebridStreams, DebridConfig } from '../../persistence/services/debrid';
+import { formatStream, parseRelease, qualityRank } from '../../persistence/services/stream-formatter';
 import { ContentType } from '../../persistence/models/stremio';
 import manifest from '../../persistence/models/stub/manifest.json';
 import MovieDTO from '../../persistence/models/transfer-objects/movie';
@@ -120,25 +121,40 @@ async function handleStreamRoute(route: string[], debridConfig: DebridConfig | n
 
     const streams = await new StreamController().getByStreamId(idToUse, type);
 
+    // Sort by quality desc, then seeders desc — so the user's top option is
+    // the best 4K/1080p release, not whatever Mongo happened to return first.
+    const sorted = [...streams].sort((a: any, b: any) => {
+        const qa = qualityRank(parseRelease(a.title || '').quality);
+        const qb = qualityRank(parseRelease(b.title || '').quality);
+        if (qb !== qa) return qb - qa;
+        return (b.seeders || 0) - (a.seeders || 0);
+    });
+
     // Always include the raw torrent streams (Stremio renders them as
     // playable via its bittorrent layer). When Debrid is configured we
-    // ADD the resolved HTTP URLs on top, so the user picks: cached Debrid
-    // (instant) or local torrent (fallback). Previously, when a Debrid
-    // attempt produced any result we hid the torrent streams entirely,
-    // which caused infinite loading whenever Debrid resolution stalled.
-    const torrentStreams = streams.map((s: any) => ({
-        name: '🦁 Mico',
-        title: s.title,
-        infoHash: s.infoHash,
-        fileIdx: s.fileIdx,
-        sources: s.sources,
-        behaviorHints: { bingeGroup: `mico-${s.infoHash?.slice(0, 8)}` }
-    }));
+    // PREPEND the resolved HTTP URLs so cached Debrid links sit at the top.
+    // The torrent rows remain as fallback if a Debrid link breaks.
+    const torrentStreams = sorted.map((s: any) => {
+        const { name, title } = formatStream({
+            rawTitle: s.title || '',
+            seeders: s.seeders || 0,
+            sizeBytes: s.size,
+            provider: s.provider || 'mico'
+        });
+        return {
+            name,
+            title,
+            infoHash: s.infoHash,
+            fileIdx: s.fileIdx,
+            sources: s.sources,
+            behaviorHints: { bingeGroup: `mico-${s.infoHash?.slice(0, 8)}` }
+        };
+    });
 
     let debridStreams: any[] = [];
     if (debridConfig) {
         try {
-            debridStreams = await resolveDebridStreams(streams, debridConfig);
+            debridStreams = await resolveDebridStreams(sorted, debridConfig);
         } catch (err) {
             console.error(`[stream] debrid failed: ${err}`);
         }
