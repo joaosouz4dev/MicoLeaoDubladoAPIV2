@@ -16,6 +16,14 @@ export function renderConfigurePage(host: string): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Mico Leão Dublado V2 — Configurar</title>
+<link rel="icon" type="image/jpeg" href="/favicon.jpg" />
+<link rel="apple-touch-icon" href="/logo.jpg" />
+<meta name="theme-color" content="#0a0f1f" />
+<meta name="description" content="Stremio addon para filmes e séries dublados em português brasileiro, com suporte a Real-Debrid e TorBox." />
+<meta property="og:title" content="Mico Leão Dublado V2" />
+<meta property="og:description" content="Stremio addon para filmes e séries dublados em português brasileiro, com suporte a Real-Debrid e TorBox." />
+<meta property="og:image" content="/logo.jpg" />
+<meta property="og:type" content="website" />
 <style>
   :root {
     color-scheme: dark;
