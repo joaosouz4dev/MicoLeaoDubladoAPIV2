@@ -9,6 +9,7 @@
  */
 import axios from 'axios';
 import Meta, { IMeta } from '../models/meta';
+import { enrichFromTmdb } from './tmdb';
 
 const CINEMETA_BASE = process.env.CINEMETA_BASE || 'https://v3-cinemeta.strem.io';
 const DEFAULT_CATALOG = 'BrazilianCatalog';
@@ -59,19 +60,22 @@ export async function ensureMetaCached(type: 'movie' | 'series', imdbId: string)
         const cm = await fetchCinemeta(type, imdbId);
         if (!cm) return null;
 
+        // PT-BR enrichment (best-effort): name + description override + poster fallback
+        const tmdb = await enrichFromTmdb(imdbId, type);
+
         const doc = new Meta({
             id: cm.id,
             type: cm.type,
-            name: cm.name,
-            poster: cm.poster,
-            background: cm.background,
+            name: tmdb?.name || cm.name,
+            poster: cm.poster || tmdb?.poster,
+            background: cm.background || tmdb?.background,
             logo: cm.logo,
-            description: cm.description,
+            description: tmdb?.description || cm.description,
             releaseInfo: cm.releaseInfo,
             imdbRating: cm.imdbRating ? parseFloat(cm.imdbRating) : undefined,
             runtime: cm.runtime,
             genres: cm.genres || [],
-            catalogs: [DEFAULT_CATALOG]
+            catalogs: [type === 'movie' ? 'MicoFilmes' : 'MicoSeries']
         });
         await doc.save();
         return doc as IMeta;

@@ -69,6 +69,10 @@ export const MetaSchema: Schema = new Schema({
     }
 });
 
+MetaSchema.index({ id: 1 }, { unique: true });
+MetaSchema.index({ catalogs: 1 });
+MetaSchema.index({ name: 'text' });
+
 const Meta = mongoose.models.Meta || model('Meta', MetaSchema);
 
 export default Meta;

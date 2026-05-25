@@ -4,8 +4,13 @@
  * Calls https://torrent-indexer.darklyn.org — a community indexer that aggregates
  * BR sources (comando-torrents, bludv, starck-filmes, etc.) and exposes JSON.
  *
- * Each result has an explicit `audio` array (e.g. ["Português", "Inglês"]) which
- * we trust as authoritative — no fragile title regex needed for the language check.
+ * Strategy:
+ *   1. Resolve the title via Cinemeta (the /search endpoint ignores imdb=)
+ *   2. Try the unified /search?q=<title> first (covers all sub-indexers)
+ *   3. If that returns nothing, fan out to each sub-indexer individually
+ *      (some are gated behind Cloudflare challenges that the aggregated
+ *      endpoint sometimes bypasses)
+ *   4. Filter by explicit `audio: ["Português", ...]` field — no fragile regex
  *
  * Reference: github.com/felipemarinho97/torrent-indexer
  */
@@ -16,6 +21,21 @@ import { fetchCinemeta } from '../cinemeta';
 
 const BASE = process.env.TORRENT_INDEXER_BASE || 'https://torrent-indexer.darklyn.org';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Stremio/4.4 MicoLeaoV2';
+const TIMEOUT_MS = 7000;
+
+/**
+ * Sub-indexers exposed by the upstream. Order roughly by historical reliability.
+ * Source: https://torrent-indexer.darklyn.org/indexers
+ */
+const SUB_INDEXERS = [
+    'comando_torrents',
+    'bludv',
+    'starck-filmes',
+    'torrent-dos-filmes',
+    'filme_torrent',
+    'rede_torrent',
+    'vaca_torrent'
+];
 
 interface IndexerResult {
     title: string;
@@ -40,7 +60,6 @@ function hasPtBrAudio(r: IndexerResult): boolean {
         const joined = r.audio.join(' ').toLowerCase();
         if (PT_BR_AUDIO_MARKERS.some((m) => joined.includes(m))) return true;
     }
-    // Fallback to title sniff (some sources don't fill audio array)
     const blob = `${r.title || ''} ${r.original_title || ''}`.toLowerCase();
     return /\bdubl|dual|pt-?br|portugu|brazilian/.test(blob);
 }
@@ -56,7 +75,7 @@ function parseSize(s: string | undefined): number | undefined {
     return Math.round(n * 1024);
 }
 
-function toNormalized(r: IndexerResult): NormalizedStream | null {
+function toNormalized(r: IndexerResult, provider: string): NormalizedStream | null {
     let infoHash = r.info_hash?.toLowerCase();
     let trackers = r.trackers || [];
     if (!infoHash && r.magnet_link) {
@@ -73,17 +92,40 @@ function toNormalized(r: IndexerResult): NormalizedStream | null {
         sources: trackers,
         seeders: r.seed_count || 0,
         size: parseSize(r.size),
-        provider: 'torrent-indexer',
+        provider,
         languages: r.audio || []
     };
 }
 
 /**
+ * Try a single endpoint of torrent-indexer (unified /search or per-indexer
+ * /indexers/{name}) and return the PT-BR results.
+ */
+async function fetchOne(url: string, providerLabel: string): Promise<NormalizedStream[]> {
+    try {
+        const res = await axios.get(url, { timeout: TIMEOUT_MS, headers: { 'User-Agent': UA, Accept: 'application/json' } });
+        if (typeof res.data === 'object' && res.data?.error) {
+            console.warn(`[torrent-indexer:${providerLabel}] upstream error: ${res.data.error}`);
+            return [];
+        }
+        const results: IndexerResult[] = Array.isArray(res.data?.results) ? res.data.results : [];
+        return results
+            .filter(hasPtBrAudio)
+            .map((r) => toNormalized(r, providerLabel))
+            .filter((s): s is NormalizedStream => s !== null);
+    } catch (err: any) {
+        console.error(`[torrent-indexer:${providerLabel}] ${err.message || err}`);
+        return [];
+    }
+}
+
+/**
  * Fetch streams from torrent-indexer for a given IMDb id.
  *
- * The /search endpoint accepts ?q=<title> (it ignores imdb=), so we first
- * resolve the title via Cinemeta and use it as the query. Then we filter
- * results by PT-BR audio markers.
+ * Order of attempts:
+ *   1. Unified /search?q=<title> — fastest, covers all sub-indexers
+ *   2. Each /indexers/{name}?q=<title> in parallel — fallback when search
+ *      returns nothing (e.g. for niche content)
  */
 export async function fetchFromTorrentIndexer(
     imdbId: string,
@@ -95,17 +137,30 @@ export async function fetchFromTorrentIndexer(
         return [];
     }
     const title = meta.name;
-    const url = `${BASE}/search?q=${encodeURIComponent(title)}&filter_results=true&sortBy=seed_count&audio=por,brazilian`;
-    try {
-        const res = await axios.get(url, { timeout: 8000, headers: { 'User-Agent': UA, Accept: 'application/json' } });
-        const results: IndexerResult[] = Array.isArray(res.data?.results) ? res.data.results : [];
-        console.log(`[torrent-indexer] q="${title}" → ${results.length} raw`);
-        return results
-            .filter(hasPtBrAudio)
-            .map(toNormalized)
-            .filter((s): s is NormalizedStream => s !== null);
-    } catch (err: any) {
-        console.error(`[torrent-indexer] failed: ${err.message || err}`);
-        return [];
+    const q = encodeURIComponent(title);
+    const audioFilter = '&audio=por,brazilian';
+
+    // 1. Unified search
+    const unified = await fetchOne(
+        `${BASE}/search?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`,
+        'torrent-indexer'
+    );
+    if (unified.length > 0) {
+        console.log(`[torrent-indexer] "${title}" via /search: ${unified.length} PT-BR streams`);
+        return unified;
     }
+
+    // 2. Per-indexer fan-out
+    console.log(`[torrent-indexer] /search empty for "${title}", trying sub-indexers`);
+    const settled = await Promise.allSettled(
+        SUB_INDEXERS.map((name) =>
+            fetchOne(`${BASE}/indexers/${name}?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`, `ti:${name}`)
+        )
+    );
+    const all: NormalizedStream[] = [];
+    for (const r of settled) {
+        if (r.status === 'fulfilled') all.push(...r.value);
+    }
+    console.log(`[torrent-indexer] "${title}" via sub-indexers: ${all.length} PT-BR streams`);
+    return all;
 }

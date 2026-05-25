@@ -86,6 +86,13 @@ export const StreamSchema: Schema = new Schema({
 
 StreamSchema.static("generateStreamId", generateStreamId);
 
+// Composite indexes inspired by betor-catalog: queries hit either {metaId,
+// infoHash} (dedupe check on insert) or {metaId, season, episode} (series
+// episode lookup), so back them with the right index shapes.
+StreamSchema.index({ metaId: 1, infoHash: 1 }, { unique: true });
+StreamSchema.index({ streamId: 1 });
+StreamSchema.index({ metaId: 1, season: 1, episode: 1 });
+
 const Stream: Model<IStream> = mongoose.models.Stream as Model<IStream> || mongoose.model<IStream>('Stream', StreamSchema);
 
 export default Stream;
