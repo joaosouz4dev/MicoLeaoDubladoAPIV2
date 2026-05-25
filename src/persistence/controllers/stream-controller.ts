@@ -59,7 +59,12 @@ export default class StreamController {
         const episode = episodeStr ? parseInt(episodeStr, 10) : undefined;
         await Promise.all(streams.map(async (s) => {
             try {
-                const exists = await Stream.findOne({ metaId, infoHash: s.infoHash }).exec();
+                // De-dupe by {streamId, infoHash} so the same pack (e.g.
+                // "The.Boys.S02" full season) can be associated with multiple
+                // episode ids without overwriting them. Previously we only
+                // checked {metaId, infoHash}, which made S02E01 and S02E05
+                // collide on the same row.
+                const exists = await Stream.findOne({ streamId, infoHash: s.infoHash }).exec();
                 if (exists) return;
                 await new Stream({
                     metaId,

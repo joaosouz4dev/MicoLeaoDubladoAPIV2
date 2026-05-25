@@ -15,15 +15,17 @@ export interface DebridConfig {
 /**
  * Debrid backend selection.
  *
- * StremThru (default) is a hosted proxy that fronts both RD and TorBox with
- * a single batch-friendly `check` endpoint, stable stream URLs, and
- * automatic cleanup of uncached magnets. We use it unless the operator
- * explicitly opts out via DEBRID_BACKEND=direct.
+ * Default is `direct` — calls Real-Debrid and TorBox APIs directly. Our
+ * client code already handles "uncached → delete the queued torrent" so
+ * the user's account stays clean.
  *
- * Direct mode keeps the original RD/TorBox clients around so the addon
- * still works if StremThru is down or rate-limited.
+ * `stremthru` is opt-in only: the public hosted instance at elfhosted.com
+ * is gated behind STREMTHRU_AUTH credentials which we don't have, and
+ * silently returns 403 for all requests. Set DEBRID_BACKEND=stremthru
+ * with STREMTHRU_AUTH=<your-basic-auth> only if you have a paid/self-hosted
+ * StremThru instance.
  */
-const DEBRID_BACKEND = (process.env.DEBRID_BACKEND || 'stremthru').toLowerCase();
+const DEBRID_BACKEND = (process.env.DEBRID_BACKEND || 'direct').toLowerCase();
 const USE_STREMTHRU = DEBRID_BACKEND === 'stremthru';
 
 const MAX_DEBRID_ATTEMPTS = parseInt(process.env.MAX_DEBRID_ATTEMPTS || '8', 10);

@@ -86,11 +86,14 @@ export const StreamSchema: Schema = new Schema({
 
 StreamSchema.static("generateStreamId", generateStreamId);
 
-// Composite indexes inspired by betor-catalog: queries hit either {metaId,
-// infoHash} (dedupe check on insert) or {metaId, season, episode} (series
-// episode lookup), so back them with the right index shapes.
-StreamSchema.index({ metaId: 1, infoHash: 1 }, { unique: true });
+// Uniqueness by {streamId, infoHash} — NOT {metaId, infoHash}. A torrent
+// pack (e.g. "The.Boys.S02" complete) is legitimately associated with
+// multiple episode streamIds (tt1190634:2:1, tt1190634:2:5, ...) and they
+// must coexist as separate rows; otherwise asking for episode 5 returns
+// nothing because the row was claimed by episode 1.
+StreamSchema.index({ streamId: 1, infoHash: 1 }, { unique: true });
 StreamSchema.index({ streamId: 1 });
+StreamSchema.index({ metaId: 1 });
 StreamSchema.index({ metaId: 1, season: 1, episode: 1 });
 
 const Stream: Model<IStream> = mongoose.models.Stream as Model<IStream> || mongoose.model<IStream>('Stream', StreamSchema);
