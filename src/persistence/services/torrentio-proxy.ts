@@ -11,6 +11,12 @@ import axios from 'axios';
 import Stream, { IStream } from '../models/stream';
 
 const TORRENTIO_BASE = process.env.TORRENTIO_BASE || 'https://torrentio.strem.fun';
+const REQUEST_HEADERS = {
+    // Torrentio rejects requests without a browser-like User-Agent (returns 403).
+    'User-Agent': 'Stremio/4.4.x (MicoLeaoDubladoAPIV2)',
+    'Accept': 'application/json',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
+};
 
 interface TorrentioStream {
     name?: string;
@@ -49,10 +55,11 @@ function isPortugueseDub(stream: TorrentioStream): boolean {
 async function fetchTorrentioRaw(type: 'movie' | 'series', stremioId: string): Promise<TorrentioStream[]> {
     const url = `${TORRENTIO_BASE}/stream/${type}/${encodeURIComponent(stremioId)}.json`;
     try {
-        const res = await axios.get(url, { timeout: 8000 });
+        const res = await axios.get(url, { timeout: 8000, headers: REQUEST_HEADERS });
         return Array.isArray(res.data?.streams) ? res.data.streams : [];
     } catch (err: any) {
-        console.error(`[torrentio] fetch failed (${url}): ${err.message || err}`);
+        const status = err.response?.status;
+        console.error(`[torrentio] fetch failed (${url}) status=${status}: ${err.message || err}`);
         return [];
     }
 }

@@ -33,7 +33,10 @@ interface CinemetaMeta {
 export async function fetchCinemeta(type: 'movie' | 'series', imdbId: string): Promise<CinemetaMeta | null> {
     const url = `${CINEMETA_BASE}/meta/${type}/${encodeURIComponent(imdbId)}.json`;
     try {
-        const res = await axios.get(url, { timeout: 6000 });
+        const res = await axios.get(url, {
+            timeout: 6000,
+            headers: { 'User-Agent': 'Stremio/4.4.x (MicoLeaoDubladoAPIV2)' }
+        });
         return res.data?.meta || null;
     } catch (err: any) {
         console.error(`[cinemeta] fetch failed (${url}): ${err.message || err}`);

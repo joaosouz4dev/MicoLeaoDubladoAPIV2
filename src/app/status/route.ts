@@ -61,14 +61,18 @@ export async function GET(_req: NextRequest) {
         };
     }
 
-    // 3. Torrentio reachability
+    // 3. Torrentio reachability — must send a browser-like UA or it returns 403.
     const torrentioStart = Date.now();
     try {
-        const r = await axios.get('https://torrentio.strem.fun/manifest.json', { timeout: 5000 });
+        const r = await axios.get('https://torrentio.strem.fun/manifest.json', {
+            timeout: 5000,
+            headers: { 'User-Agent': 'Stremio/4.4.x (MicoLeaoDubladoAPIV2)' }
+        });
         result.checks.torrentio = { ok: r.status === 200, latencyMs: Date.now() - torrentioStart };
     } catch (err: any) {
         result.checks.torrentio = {
             ok: false,
+            status: err.response?.status,
             error: String(err?.message || err),
             latencyMs: Date.now() - torrentioStart
         };
