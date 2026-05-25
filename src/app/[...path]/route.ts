@@ -120,24 +120,31 @@ async function handleStreamRoute(route: string[], debridConfig: DebridConfig | n
 
     const streams = await new StreamController().getByStreamId(idToUse, type);
 
-    if (debridConfig) {
-        try {
-            const debridStreams = await resolveDebridStreams(streams, debridConfig);
-            if (debridStreams.length > 0) return NextResponse.json({ streams: debridStreams });
-        } catch (err) {
-            console.error(`[stream] debrid failed: ${err}`);
-        }
-    }
-    // Strip Mongoose-specific keys; Stremio only needs the well-known fields.
-    const trimmed = streams.map((s: any) => ({
-        name: s.name,
+    // Always include the raw torrent streams (Stremio renders them as
+    // playable via its bittorrent layer). When Debrid is configured we
+    // ADD the resolved HTTP URLs on top, so the user picks: cached Debrid
+    // (instant) or local torrent (fallback). Previously, when a Debrid
+    // attempt produced any result we hid the torrent streams entirely,
+    // which caused infinite loading whenever Debrid resolution stalled.
+    const torrentStreams = streams.map((s: any) => ({
+        name: '🦁 Mico',
         title: s.title,
         infoHash: s.infoHash,
         fileIdx: s.fileIdx,
         sources: s.sources,
-        behaviorHints: s.behaviorHints
+        behaviorHints: { bingeGroup: `mico-${s.infoHash?.slice(0, 8)}` }
     }));
-    return NextResponse.json({ streams: trimmed });
+
+    let debridStreams: any[] = [];
+    if (debridConfig) {
+        try {
+            debridStreams = await resolveDebridStreams(streams, debridConfig);
+        } catch (err) {
+            console.error(`[stream] debrid failed: ${err}`);
+        }
+    }
+
+    return NextResponse.json({ streams: [...debridStreams, ...torrentStreams] });
 }
 
 async function handleMetaRoute(route: string[]) {

@@ -3,7 +3,7 @@
 	"name": "🦁 Mico Leão Dublado V2",
 	"logo": "https://raw.githubusercontent.com/joaosouz4dev/MicoLeaoDubladoAPIV2/main/assets/logo.jpg",
 	"background": "https://raw.githubusercontent.com/joaosouz4dev/MicoLeaoDubladoAPIV2/main/assets/logo.jpg",
-	"version": "2.0.2",
+	"version": "2.1.0",
 	"description": "🇧🇷 Filmes e séries dublados em português. Suporte a Debrid (Real-Debrid, TorBox). Código aberto em github.com/joaosouz4dev/MicoLeaoDubladoAPIV2",
 	"resources": ["catalog", "stream"],
 	"types": ["movie", "series"],
@@ -12,15 +12,21 @@
 			"type": "movie",
 			"id": "MicoFilmes",
 			"name": "🦁 Mico - Filmes",
-			"genres": ["Ação", "Animação", "Aventura", "Clássico", "Comédia", "Documentário", "Drama", "Fantasia", "Ficção", "Faroeste", "Guerra", "Músicas", "Nacional", "Policial", "Romance", "Suspense", "Terror"],
-			"extraSupported": ["search", "genre", "skip"]
+			"extra": [
+				{ "name": "search", "isRequired": false },
+				{ "name": "genre", "isRequired": false, "options": ["Ação", "Animação", "Aventura", "Clássico", "Comédia", "Documentário", "Drama", "Fantasia", "Ficção", "Faroeste", "Guerra", "Músicas", "Nacional", "Policial", "Romance", "Suspense", "Terror"] },
+				{ "name": "skip", "isRequired": false }
+			]
 		},
 		{
 			"type": "series",
 			"id": "MicoSeries",
 			"name": "🦁 Mico - Séries",
-			"genres": ["Ação", "Animação", "Aventura", "Comédia", "Drama", "Fantasia", "Ficção", "Romance", "Suspense", "Terror"],
-			"extraSupported": ["search", "genre", "skip"]
+			"extra": [
+				{ "name": "search", "isRequired": false },
+				{ "name": "genre", "isRequired": false, "options": ["Ação", "Animação", "Aventura", "Comédia", "Drama", "Fantasia", "Ficção", "Romance", "Suspense", "Terror"] },
+				{ "name": "skip", "isRequired": false }
+			]
 		}
 	],
 	"idPrefixes": ["tt"],
