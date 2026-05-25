@@ -1,0 +1,6 @@
+name = "mico-torrentio-proxy"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Optional: set a shared secret to restrict who can use this proxy
+# Run: wrangler secret put WORKER_SECRET

@@ -22,11 +22,14 @@ const UPSTREAM_BASES = (process.env.TORRENTIO_BASE || [
     'https://mediafusion.elfhosted.com'
 ].join(',')).split(',').map((s) => s.trim()).filter(Boolean);
 
-const REQUEST_HEADERS = {
+const REQUEST_HEADERS: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Stremio/4.4',
     'Accept': 'application/json',
     'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
 };
+if (process.env.WORKER_SECRET) {
+    REQUEST_HEADERS['x-worker-secret'] = process.env.WORKER_SECRET;
+}
 
 interface TorrentioStream {
     name?: string;
