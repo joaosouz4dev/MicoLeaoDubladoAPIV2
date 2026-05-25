@@ -23,7 +23,7 @@ const UA = { 'User-Agent': 'Stremio/4.4 MicoLeaoV2-Cron' };
  * Vercel function timeout. Pagination state lives in the DB (Stream count
  * heuristic) so successive runs cover more titles.
  */
-const MAX_PER_RUN = 15;
+const MAX_PER_RUN = parseInt(process.env.CRON_MAX_PER_RUN || '30', 10);
 
 export async function GET(req: NextRequest) {
     const auth = req.headers.get('authorization');
@@ -52,38 +52,49 @@ export async function GET(req: NextRequest) {
             ...topSeries.slice(0, MAX_PER_RUN / 2).map((id) => ({ id, type: 'series' as const }))
         ];
 
-        for (const item of queue) {
+        // Process titles in parallel batches so 30 items still fit in 60s.
+        // Each batch hits aggregateProviders concurrently and persists results
+        // in parallel. Concurrency cap balances throughput vs upstream API
+        // strain (torrent-indexer rate-limit, Knaben Cloudflare).
+        const BATCH_SIZE = parseInt(process.env.CRON_BATCH_SIZE || '5', 10);
+        for (let i = 0; i < queue.length; i += BATCH_SIZE) {
             if (Date.now() - started > 50_000) {
-                console.log(`[cron] timeout approaching, stopping`);
+                console.log(`[cron] timeout approaching at batch ${i}, stopping`);
                 break;
             }
-            try {
-                const streamId = item.type === 'series' ? `${item.id}:1:1` : item.id;
-                const before = await Stream.countDocuments({ metaId: item.id }).exec();
-                const streams = await aggregateProviders(item.type, streamId);
-                let persisted = 0;
-                for (const s of streams) {
-                    const exists = await Stream.findOne({ metaId: item.id, infoHash: s.infoHash }).exec();
-                    if (exists) continue;
-                    await new Stream({
-                        metaId: item.id,
-                        streamId,
-                        type: item.type,
-                        title: s.title,
-                        infoHash: s.infoHash,
-                        sources: s.sources,
-                        seeders: s.seeders,
-                        size: s.size,
-                        updatedAt: new Date()
-                    }).save();
-                    persisted++;
+            const batch = queue.slice(i, i + BATCH_SIZE);
+            await Promise.all(batch.map(async (item) => {
+                try {
+                    const streamId = item.type === 'series' ? `${item.id}:1:1` : item.id;
+                    const streams = await aggregateProviders(item.type, streamId);
+                    let persisted = 0;
+                    await Promise.all(streams.map(async (s) => {
+                        try {
+                            const exists = await Stream.findOne({ streamId, infoHash: s.infoHash }).exec();
+                            if (exists) return;
+                            await new Stream({
+                                metaId: item.id,
+                                streamId,
+                                type: item.type,
+                                title: s.title,
+                                infoHash: s.infoHash,
+                                sources: s.sources,
+                                seeders: s.seeders,
+                                size: s.size,
+                                updatedAt: new Date()
+                            }).save();
+                            persisted++;
+                        } catch (err) {
+                            // Ignore unique-index races between concurrent batches
+                        }
+                    }));
+                    ensureMetaCached(item.type, item.id).catch(() => {});
+                    result.processed.push({ id: item.id, type: item.type, streamsFound: streams.length, persisted });
+                    console.log(`[cron] ${item.type}/${item.id}: ${streams.length} found, ${persisted} new`);
+                } catch (err: any) {
+                    console.error(`[cron] ${item.id} failed: ${err.message || err}`);
                 }
-                await ensureMetaCached(item.type, item.id).catch(() => {});
-                result.processed.push({ id: item.id, type: item.type, streamsFound: streams.length, persisted });
-                console.log(`[cron] ${item.type}/${item.id}: ${streams.length} found, ${persisted} new (cache before=${before})`);
-            } catch (err: any) {
-                console.error(`[cron] ${item.id} failed: ${err.message || err}`);
-            }
+            }));
         }
     } catch (err: any) {
         console.error(`[cron] fatal: ${err.message || err}`);
