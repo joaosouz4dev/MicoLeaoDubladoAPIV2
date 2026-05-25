@@ -82,15 +82,10 @@ export function renderConfigurePage(host: string): string {
   </div>
 
   <footer style="margin-top:24px;color:#6c7591;font-size:13px;text-align:center;max-width:460px">
-    <p style="margin:0 0 8px">
+    <p style="margin:0">
       <a href="https://github.com/joaosouz4dev/MicoLeaoDubladoAPIV2" target="_blank" style="color:#7da6ff;text-decoration:none">
         ⭐ github.com/joaosouz4dev/MicoLeaoDubladoAPIV2
       </a>
-    </p>
-    <p style="margin:0;font-size:11px">
-      Sucessor independente de
-      <a href="https://github.com/victorgveloso/MicoLeaoDubladoAPI" target="_blank" style="color:#6c7591">victorgveloso/MicoLeaoDubladoAPI</a>
-      · Apache 2.0
     </p>
   </footer>
 
