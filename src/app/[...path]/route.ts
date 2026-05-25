@@ -8,6 +8,7 @@ import disassembleSeries from '../../persistence/controllers/series-assembler';
 import StreamDAO from '../../persistence/controllers/stream-dao';
 import { parseDebridConfig, resolveDebridStreams, DebridConfig } from '../../persistence/services/debrid';
 import { formatStream, parseRelease, qualityRank } from '../../persistence/services/stream-formatter';
+import { renderConfigurePage } from '../../configure-page';
 import { ContentType } from '../../persistence/models/stremio';
 import manifest from '../../persistence/models/stub/manifest.json';
 import MovieDTO from '../../persistence/models/transfer-objects/movie';
@@ -46,9 +47,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         }
 
         const resource = route[0];
-        if (resource === 'catalog') return await handleCatalogRoute(route);
-        if (resource === 'stream')  return await handleStreamRoute(route, debridConfig);
-        if (resource === 'meta')    return await handleMetaRoute(route);
+        if (resource === 'catalog')   return await handleCatalogRoute(route);
+        if (resource === 'stream')    return await handleStreamRoute(route, debridConfig);
+        if (resource === 'meta')      return await handleMetaRoute(route);
+        if (resource === 'configure') return handleConfigureRoute(req);
 
         return NextResponse.json({ error: 'Not found', path: route }, { status: 404 });
     } catch (err: any) {
@@ -84,6 +86,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
         console.error(`[router] POST error: ${err?.stack || err}`);
         return NextResponse.json({ error: String(err?.message || err) }, { status: 400 });
     }
+}
+
+/**
+ * Render the configure page for /<config>/configure URLs (Stremio appends
+ * /configure to the manifest URL when the user clicks the gear icon).
+ * The standalone /configure route at app/configure/route.ts handles the
+ * no-prefix case.
+ */
+function handleConfigureRoute(req: NextRequest): Response {
+    const host = req.headers.get('host') || 'localhost:3000';
+    const proto = req.headers.get('x-forwarded-proto') || (host.startsWith('localhost') ? 'http' : 'https');
+    return new Response(renderConfigurePage(`${proto}://${host}`), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
 }
 
 function stripJson(s: string): string {
