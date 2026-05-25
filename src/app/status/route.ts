@@ -6,6 +6,7 @@ import Stream from '../../persistence/models/stream';
 import Meta from '../../persistence/models/meta';
 import manifest from '../../persistence/models/stub/manifest.json';
 import { getBreakerStates } from '../../persistence/services/providers/circuit-breaker';
+import { listStremioAddonSources } from '../../persistence/services/providers/stremio-addon';
 
 export const dynamic = 'force-dynamic';
 
@@ -135,6 +136,7 @@ async function collectStatus() {
 
     // Circuit breaker states
     data.breakers = getBreakerStates();
+    data.stremioAddonSources = listStremioAddonSources();
 
     // Manifest sanity
     data.checks.manifest = {
@@ -294,6 +296,15 @@ function renderHtml(d: any): string {
     ])}
 
     ${renderBreakers(d.breakers)}
+
+    <div class="card">
+      <h2><span class="dot ok"></span>Fontes Stremio</h2>
+      ${(d.stremioAddonSources || []).length === 0
+          ? '<div class="row"><span class="key">Estado</span><span class="val dim">Nenhuma configurada</span></div>'
+          : (d.stremioAddonSources as string[]).map((name) =>
+              `<div class="row"><span class="key">${escapeHtml(name)}</span><span class="val dim">addon Stremio</span></div>`
+            ).join('')}
+    </div>
 
     <div class="card">
       <h2><span class="dot ${checks.manifest.ok ? 'ok' : 'bad'}"></span>Manifest</h2>
