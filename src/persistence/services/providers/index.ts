@@ -17,7 +17,7 @@ export async function aggregateProviders(
 ): Promise<NormalizedStream[]> {
     const imdbId = stremioId.split(':')[0];
     const settled = await Promise.allSettled([
-        fetchFromTorrentIndexer(imdbId),
+        fetchFromTorrentIndexer(imdbId, type),
         fetchFromTorrentio(type, stremioId)
     ]);
 

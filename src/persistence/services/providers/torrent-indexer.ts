@@ -12,6 +12,7 @@
 import axios from 'axios';
 import { decode } from 'magnet-uri';
 import type { NormalizedStream } from './types';
+import { fetchCinemeta } from '../cinemeta';
 
 const BASE = process.env.TORRENT_INDEXER_BASE || 'https://torrent-indexer.darklyn.org';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Stremio/4.4 MicoLeaoV2';
@@ -78,17 +79,27 @@ function toNormalized(r: IndexerResult): NormalizedStream | null {
 }
 
 /**
- * Fetch streams from torrent-indexer for a given IMDb id. The /search endpoint
- * accepts `imdb=tt...` and returns the same shape across all sub-indexers.
+ * Fetch streams from torrent-indexer for a given IMDb id.
  *
- * Returns only entries flagged as PT-BR audio.
+ * The /search endpoint accepts ?q=<title> (it ignores imdb=), so we first
+ * resolve the title via Cinemeta and use it as the query. Then we filter
+ * results by PT-BR audio markers.
  */
-export async function fetchFromTorrentIndexer(imdbId: string): Promise<NormalizedStream[]> {
-    const url = `${BASE}/search?imdb=${encodeURIComponent(imdbId)}&filter_results=true&sortBy=seed_count`;
+export async function fetchFromTorrentIndexer(
+    imdbId: string,
+    type: 'movie' | 'series' = 'movie'
+): Promise<NormalizedStream[]> {
+    const meta = await fetchCinemeta(type, imdbId);
+    if (!meta?.name) {
+        console.warn(`[torrent-indexer] no title from Cinemeta for ${imdbId}`);
+        return [];
+    }
+    const title = meta.name;
+    const url = `${BASE}/search?q=${encodeURIComponent(title)}&filter_results=true&sortBy=seed_count&audio=por,brazilian`;
     try {
         const res = await axios.get(url, { timeout: 8000, headers: { 'User-Agent': UA, Accept: 'application/json' } });
         const results: IndexerResult[] = Array.isArray(res.data?.results) ? res.data.results : [];
-        console.log(`[torrent-indexer] ${imdbId}: ${results.length} raw, filtering PT-BR`);
+        console.log(`[torrent-indexer] q="${title}" → ${results.length} raw`);
         return results
             .filter(hasPtBrAudio)
             .map(toNormalized)
