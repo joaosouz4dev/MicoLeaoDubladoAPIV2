@@ -18,6 +18,7 @@ import axios from 'axios';
 import { decode } from 'magnet-uri';
 import type { NormalizedStream } from './types';
 import { fetchCinemeta } from '../cinemeta';
+import { lookupTitles, tmdbAvailable } from '../tmdb';
 
 const BASE = process.env.TORRENT_INDEXER_BASE || 'https://torrent-indexer.darklyn.org';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Stremio/4.4 MicoLeaoV2';
@@ -123,35 +124,41 @@ async function fetchOne(url: string, providerLabel: string): Promise<NormalizedS
  * Fetch streams from torrent-indexer for a given IMDb id.
  *
  * Order of attempts:
- *   1. Unified /search?q=<title> — fastest, covers all sub-indexers
- *   2. Each /indexers/{name}?q=<title> in parallel — fallback when search
- *      returns nothing (e.g. for niche content)
+ *   1. Look up PT-BR title (via TMDB when available) + original title.
+ *      BR torrents are usually named in PT-BR, so the PT-BR query hits.
+ *      Some releases ship under the original title, so try both.
+ *   2. Unified /search?q=<title>&audio=por for each title
+ *   3. Per-sub-indexer fan-out as last resort
  */
 export async function fetchFromTorrentIndexer(
     imdbId: string,
     type: 'movie' | 'series' = 'movie'
 ): Promise<NormalizedStream[]> {
-    const meta = await fetchCinemeta(type, imdbId);
-    if (!meta?.name) {
-        console.warn(`[torrent-indexer] no title from Cinemeta for ${imdbId}`);
+    const titles = await resolveTitles(imdbId, type);
+    if (titles.length === 0) {
+        console.warn(`[torrent-indexer] no title resolved for ${imdbId}`);
         return [];
     }
-    const title = meta.name;
-    const q = encodeURIComponent(title);
+
     const audioFilter = '&audio=por,brazilian';
 
-    // 1. Unified search
-    const unified = await fetchOne(
-        `${BASE}/search?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`,
-        'torrent-indexer'
-    );
-    if (unified.length > 0) {
-        console.log(`[torrent-indexer] "${title}" via /search: ${unified.length} PT-BR streams`);
-        return unified;
+    // 1. Unified search — try each candidate title until one returns results
+    for (const title of titles) {
+        const q = encodeURIComponent(title);
+        const found = await fetchOne(
+            `${BASE}/search?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`,
+            'torrent-indexer'
+        );
+        if (found.length > 0) {
+            console.log(`[torrent-indexer] "${title}" via /search: ${found.length} PT-BR streams`);
+            return found;
+        }
     }
 
-    // 2. Per-indexer fan-out
-    console.log(`[torrent-indexer] /search empty for "${title}", trying sub-indexers`);
+    // 2. Per-sub-indexer fan-out, with the first title only (to bound cost)
+    const fallbackTitle = titles[0];
+    const q = encodeURIComponent(fallbackTitle);
+    console.log(`[torrent-indexer] /search empty for ${imdbId}, fanning out to sub-indexers with "${fallbackTitle}"`);
     const settled = await Promise.allSettled(
         SUB_INDEXERS.map((name) =>
             fetchOne(`${BASE}/indexers/${name}?q=${q}&filter_results=true&sortBy=seed_count${audioFilter}`, `ti:${name}`)
@@ -161,6 +168,33 @@ export async function fetchFromTorrentIndexer(
     for (const r of settled) {
         if (r.status === 'fulfilled') all.push(...r.value);
     }
-    console.log(`[torrent-indexer] "${title}" via sub-indexers: ${all.length} PT-BR streams`);
+    console.log(`[torrent-indexer] "${fallbackTitle}" via sub-indexers: ${all.length} PT-BR streams`);
     return all;
+}
+
+/**
+ * Resolve candidate titles for an IMDb id, in priority order.
+ * TMDB (when configured) returns both PT-BR and original; otherwise we fall
+ * back to Cinemeta's English name. We dedupe and skip empties.
+ */
+async function resolveTitles(imdbId: string, type: 'movie' | 'series'): Promise<string[]> {
+    const candidates: (string | undefined)[] = [];
+    if (tmdbAvailable()) {
+        const t = await lookupTitles(imdbId, type);
+        candidates.push(t.ptBr, t.original);
+    }
+    if (candidates.length === 0 || candidates.every((c) => !c)) {
+        const cm = await fetchCinemeta(type, imdbId);
+        candidates.push(cm?.name);
+    }
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of candidates) {
+        if (!c) continue;
+        const key = c.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(c.trim());
+    }
+    return out;
 }
