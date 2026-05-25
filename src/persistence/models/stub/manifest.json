@@ -1,16 +1,16 @@
 {
 	"id": "brazilian-addon-v2",
-	"name": "Mico-Leão Dublado V2 (BR addon)",
+	"name": "🦁 Mico Leão Dublado V2",
 	"logo": "https://raw.githubusercontent.com/joaosouz4dev/MicoLeaoDubladoAPIV2/main/assets/logo.jpg",
 	"background": "https://raw.githubusercontent.com/joaosouz4dev/MicoLeaoDubladoAPIV2/main/assets/logo.jpg",
-	"version": "2.0.0",
-	"description": "🇧🇷 Filmes e séries dublados em português. Suporte a Debrid (Real-Debrid, TorBox). Versão V2 — código aberto em github.com/joaosouz4dev/MicoLeaoDubladoAPIV2",
+	"version": "2.0.1",
+	"description": "🇧🇷 Filmes e séries dublados em português. Suporte a Debrid (Real-Debrid, TorBox). Código aberto em github.com/joaosouz4dev/MicoLeaoDubladoAPIV2",
 	"resources": ["catalog", "stream"],
 	"types": ["movie", "series"],
 	"catalogs": [{
 		"type": "movie",
-		"id": "BrazilianCatalog",
-		"name": "Mico Catálogo Dublado 🦁",
+		"id": "MicoTodos",
+		"name": "🦁 Mico - Todos",
 		"genres": ["Ação", "Animação", "Aventura", "Clássico", "Comédia", "Documentário", "Drama", "Fantasia", "Ficção", "Faroeste", "Guerra", "Músicas", "Nacional", "Policial", "Romance", "Suspense", "Terror"],
 		"extraSupported": ["search", "genre", "skip"]
 	}],
